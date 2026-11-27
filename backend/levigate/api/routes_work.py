@@ -202,7 +202,7 @@ async def my_queue(
 
     if role in (Role.BILLING, Role.PHARMACIST, Role.ADMIN):
         if item_type and item_type not in {t.value for t in WorkItemType}:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Unknown item type.")
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Unknown item type.")
         size = page_size(limit)
         items, counts, filtered_total = await _queue_items(
             db, principal, today, item_type=item_type, offset=(page - 1) * size, limit=size
@@ -607,7 +607,7 @@ async def approve(
     is_review = item.type == WorkItemType.REJECT_REVIEW
     if is_review and not (body.note and body.note.strip()):
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             "Add a note saying how this code was handled before closing the review.",
         )
 
@@ -802,9 +802,9 @@ async def claims_tracker(
     end = end or today
     start = start or end - timedelta(days=30)
     if (end - start).days > 200:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Choose a date range of 200 days or less.")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Choose a date range of 200 days or less.")
     if claim_status and claim_status not in CLAIM_STATUSES:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Unknown status filter.")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Unknown status filter.")
     rows = await _tracker_rows(
         db, principal.user.tenant_id, start, end, payer_id, reject_code, location, min_amount, max_amount, rx_number
     )
@@ -884,7 +884,7 @@ async def export_claims(
 ) -> Response:
     """C-12: role-restricted, step-up confirmed, watermarked with user and time, and logged."""
     if (body.end - body.start).days > 200:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Choose a date range of 200 days or less.")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Choose a date range of 200 days or less.")
     rows = await _tracker_rows(
         db, principal.user.tenant_id, body.start, body.end, body.payer_id, None, None, None, None, None
     )

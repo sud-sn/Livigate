@@ -25,7 +25,7 @@ jobs:
           POSTGRES_DB: levigate
         ports: ["5432:5432"]
         options: >-
-          --health-cmd "pg_isready -U ci" --health-interval 5s --health-timeout 5s --health-retries 12
+          --health-cmd "pg_isready -U ci -d levigate" --health-interval 5s --health-timeout 5s --health-retries 12
     defaults:
       run:
         working-directory: backend
@@ -48,7 +48,7 @@ jobs:
           LEVIGATE_TEST_PG_URL: postgresql+asyncpg://ci:ci@localhost:5432/levigate
       - name: Dependency vulnerabilities
         run: |
-          uv export --frozen --no-dev --no-hashes --format requirements-txt > /tmp/requirements.txt
+          uv export --frozen --no-dev --no-hashes --no-emit-project --format requirements-txt > /tmp/requirements.txt
           uv run pip-audit -r /tmp/requirements.txt --strict
 
   frontend:

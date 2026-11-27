@@ -288,7 +288,7 @@ async def propose(
         "verify_prescriber",
         "dur_review",
     }:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Choose one of the supported playbook handlers.")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Choose one of the supported playbook handlers.")
     async with audit.audit_transaction(db):
         try:
             e = await catalog.propose(db, principal.actor, body.kind, body.key, body.title, body.body, body.change_note)

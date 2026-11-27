@@ -735,7 +735,7 @@ async def audit_pack(
     body: AuditPackIn, principal: Principal = Depends(require("audit.export")), db: AsyncSession = Depends(db_session)
 ) -> Response:
     if body.end < body.start or (body.end - body.start).days > 400:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Choose a date range of up to 400 days.")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Choose a date range of up to 400 days.")
     tenant = principal.user.tenant_id
     tz = _tz()
     start_dt = datetime.combine(body.start, datetime.min.time(), tzinfo=tz)

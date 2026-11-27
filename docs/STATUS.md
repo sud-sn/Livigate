@@ -73,3 +73,6 @@ validated chart colours with table views.
 4. Telephony provider integration (click-to-call, call status, opt-out sync) once its BAA is signed.
 5. IF-06, PO-06, PR-05/06, CC-05 notifications, guided tour + sandbox.
 6. HubSpot phase 1 (HS-01, HS-02).
+7. Upgrade React Router 6 → 7. Two moderate advisories remain on 6.30.6 (open redirect via backslash in
+   `<Link>`/`useNavigate`; SSR hydration injection). Neither applies today — the app only navigates to paths it
+   builds itself and does no server-side rendering — but the major upgrade clears them.

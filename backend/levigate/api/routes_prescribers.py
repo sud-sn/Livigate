@@ -166,7 +166,7 @@ async def ranked(
     db: AsyncSession = Depends(db_session),
 ) -> dict[str, Any]:
     if segment not in SEGMENTS:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Unknown segment.")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Unknown segment.")
     today = clock.today()
     scored, formula = await _scored(db, principal.user.tenant_id, today)
     owners, last, rejects = await _context(db, principal.user.tenant_id, today)
@@ -295,7 +295,7 @@ async def log_activity(
     if not await get_connector().fetch("prescriber_detail", prescriber_id=prescriber_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Prescriber not found.")
     if body.next_action and not body.next_action_due:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Add a due date for the next action.")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Add a due date for the next action.")
     async with audit.audit_transaction(db):
         # Completing a logged contact closes the open next action it answered.
         for prior in (

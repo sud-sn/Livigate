@@ -182,7 +182,7 @@ async def call_lists(
     db: AsyncSession = Depends(db_session),
 ) -> dict[str, Any]:
     if list_type not in LIST_TYPES:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Unknown list.")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Unknown list.")
     today = clock.today()
     lists = await build_lists(db, principal.user.tenant_id, today)
     meta = lists.pop("_meta")
@@ -247,7 +247,7 @@ async def start_call(
     body: CallIn, principal: Principal = Depends(require("outreach.call")), db: AsyncSession = Depends(db_session)
 ) -> dict[str, Any]:
     if body.list_type not in LIST_TYPES:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Unknown list.")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Unknown list.")
     pending = await db.scalar(
         select(OutreachContact).where(OutreachContact.user_id == principal.user.id, OutreachContact.outcome.is_(None))
     )
@@ -358,7 +358,7 @@ async def call_script(
     body: ScriptIn, principal: Principal = Depends(require("outreach.view")), db: AsyncSession = Depends(db_session)
 ) -> dict[str, Any]:
     if body.list_type not in LIST_TYPES:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Unknown list.")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Unknown list.")
     today = clock.today()
     lists = await build_lists(db, principal.user.tenant_id, today)
     entry = next(
