@@ -7,6 +7,8 @@ export default defineConfig({
   plugins: [react()],
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   server: {
+    // IPv4 explicitly: "localhost" can resolve to ::1 only, while the API and the browser tests use 127.0.0.1
+    host: "127.0.0.1",
     port: 5173,
     proxy: { "/api": { target: process.env.LEVIGATE_API ?? "http://127.0.0.1:8000", changeOrigin: false } },
   },

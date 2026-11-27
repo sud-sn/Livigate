@@ -116,8 +116,9 @@ jobs:
           cd backend && uv run python -m levigate.demo.seed
           nohup uv run uvicorn levigate.main:app --port 8000 > /tmp/api.log 2>&1 &
           echo $! > /tmp/api.pid
-          cd ../frontend && nohup npx vite --port 5173 --strictPort > /tmp/web.log 2>&1 &
-          for i in $(seq 1 60); do curl -sf localhost:8000/api/health && curl -sf localhost:5173 >/dev/null && break; sleep 1; done
+          # Bind to IPv4 explicitly: on the runner "localhost" resolves to ::1, but the tests browse 127.0.0.1
+          cd ../frontend && nohup npx vite --host 127.0.0.1 --port 5173 --strictPort > /tmp/web.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf 127.0.0.1:8000/api/health && curl -sf 127.0.0.1:5173 >/dev/null && break; sleep 1; done
       - name: Smoke test (demo script)
         working-directory: frontend
         run: npm run e2e
@@ -126,10 +127,13 @@ jobs:
           kill "$(cat /tmp/api.pid)" && sleep 1
           cd backend && uv run python -m levigate.demo.seed
           nohup uv run uvicorn levigate.main:app --port 8000 > /tmp/api.log 2>&1 &
-          for i in $(seq 1 60); do curl -sf localhost:8000/api/health && break; sleep 1; done
+          for i in $(seq 1 60); do curl -sf 127.0.0.1:8000/api/health && break; sleep 1; done
       - name: Role journeys and accessibility (WCAG 2.1 A/AA, light and dark)
         working-directory: frontend
         run: npm run e2e:journeys
+      - name: Server logs
+        if: failure()
+        run: tail -n 80 /tmp/api.log /tmp/web.log
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
@@ -153,17 +157,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build -t levigate-api:ci backend && docker build -t levigate-web:ci frontend
-      - name: Scan API image
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: levigate-api:ci
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: "1"
-      - name: Scan web image
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: levigate-web:ci
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: "1"
+      # Trivy's pinned container image (the old action tag is no longer published)
+      - name: Scan images (fails on fixable high or critical vulnerabilities)
+        run: |
+          for image in levigate-api:ci levigate-web:ci; do
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.76.2 \
+              image --no-progress --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "$image"
+          done
