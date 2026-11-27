@@ -11,7 +11,8 @@
     "typecheck": "tsc -b",
     "lint": "eslint .",
     "test": "vitest run",
-    "e2e": "node e2e/smoke.mjs"
+    "e2e": "node e2e/smoke.mjs",
+    "e2e:journeys": "node e2e/journeys.mjs"
   },
   "dependencies": {
     "@fontsource/inter": "5.1.0",
@@ -23,7 +24,7 @@
     "lucide-react": "0.468.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "react-router-dom": "6.30.6",
+    "react-router": "7.18.5",
     "tailwind-merge": "2.5.5"
   },
   "devDependencies": {
@@ -36,6 +37,7 @@
     "@types/react-dom": "18.3.5",
     "@vitejs/plugin-react": "4.3.4",
     "autoprefixer": "10.4.20",
+    "axe-core": "4.14.0",
     "eslint": "9.17.0",
     "eslint-plugin-react-hooks": "5.1.0",
     "globals": "15.14.0",

@@ -1,7 +1,7 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { AlertTriangle, ArrowRight, Clock3, PhoneCall } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router";
 import { PageHeader } from "@/app/Shell";
 import { cn } from "@/design-system/cn";
 import { PharmacyIcon } from "@/design-system/icons";

@@ -47,7 +47,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     s = get_settings()
     engine = init_engine(s.app_db_url)
     await create_schema(engine)
-    connector = init_connector(s.warehouse_url, s.connector_allowed_hosts, s.connector_query_timeout_s)
+    connector = init_connector(
+        s.warehouse_url, s.connector_allowed_hosts, s.connector_query_timeout_s, s.source_profile
+    )
     task = None
     if s.sync_enabled and s.env != "test":
         task = asyncio.create_task(

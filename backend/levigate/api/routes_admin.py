@@ -1,15 +1,16 @@
-"""Admin (AD-01 … AD-03): users and roles, data connections, the business catalog, sync runs and health."""
+"""Admin (AD-01 … AD-03): users and roles, data connections and the source mapping, the business catalog, sync runs and
+health."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from levigate import audit, catalog, clock
+from levigate import audit, catalog, clock, quality
 from levigate.api.deps import Principal, db_session, require
 from levigate.config import get_settings
 from levigate.connectors import get_connector
@@ -26,6 +27,7 @@ from levigate.models import (
     utcnow,
 )
 from levigate.services import clear_reference_cache, user_names
+from levigate.sources import RELATION_MEANING
 from levigate.sync import run_sync
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -218,6 +220,87 @@ async def toggle_connection(
 
 
 # ---------------------------------------------------------------------------------------------------------------
+# Source mapping: how the client's warehouse maps onto Levigate's canonical relations
+# ---------------------------------------------------------------------------------------------------------------
+
+
+@router.get("/data-source")
+async def data_source(
+    principal: Principal = Depends(require("admin.connections")), db: AsyncSession = Depends(db_session)
+) -> dict[str, Any]:
+    """The active source profile, its mapping SQL (reviewed code, no data), and a live check of the column contract."""
+    connector = get_connector()
+    profile = connector.profile
+    definitions = profile.definitions()
+    last = await db.scalar(
+        select(SyncRun)
+        .where(SyncRun.tenant_id == principal.user.tenant_id, SyncRun.status == "ok")
+        .order_by(SyncRun.id.desc())
+        .limit(1)
+    )
+    contract = await quality.mapping_contract(connector)
+    return {
+        "profile": {
+            "name": profile.name,
+            "title": profile.title,
+            "description": profile.description,
+            "notes": list(profile.notes),
+        },
+        "relations": [
+            {
+                **c,
+                "meaning": RELATION_MEANING[c["relation"]],
+                "mapped": c["relation"] in profile.relations,
+                "sql": definitions.get(c["relation"], "").strip() or None,
+            }
+            for c in contract
+        ],
+        "helpers": [{"name": n, "sql": sql.strip()} for n, sql in profile.helpers.items()],
+        "bi_views": list(profile.parity),
+        "checks": len(quality.CANONICAL_CHECKS) + len(profile.quality_checks),
+        "last_sync": {
+            "finished_at": as_utc(last.finished_at).isoformat() if last and last.finished_at else None,
+            "quality": (last.stats or {}).get("quality") if last else None,
+            "findings": (last.stats or {}).get("quality_findings", []) if last else [],
+        },
+    }
+
+
+@router.post("/data-source/checks")
+async def run_data_checks(
+    principal: Principal = Depends(require("admin.connections")), db: AsyncSession = Depends(db_session)
+) -> dict[str, Any]:
+    """Run every data-quality check now. Results are counts and explanations only, never patient details."""
+    results = await quality.run_quality_checks(get_connector(), clock.today())
+    summary = quality.summarize(results)
+    async with audit.audit_transaction(db):
+        await audit.record(db, principal.actor, "admin.data_checks_run", "data_source", "checks", detail=summary)
+    return {"summary": summary, "results": quality.as_dicts(results)}
+
+
+@router.get("/data-source/parity")
+async def bi_parity(
+    window_days: int = Query(120, ge=7, le=365),
+    principal: Principal = Depends(require("admin.connections")),
+    db: AsyncSession = Depends(db_session),
+) -> dict[str, Any]:
+    """Compare Levigate's numbers with the client's own BI views on the same fills (Rx and fill numbers only)."""
+    report = await quality.parity_report(
+        db, get_connector(), principal.user.tenant_id, clock.today(), window_days=window_days
+    )
+    async with audit.audit_transaction(db):
+        await audit.record(
+            db,
+            principal.actor,
+            "admin.bi_parity_viewed",
+            "data_source",
+            "parity",
+            detail={"window_days": window_days, "unexplained": report.get("unexplained")},
+        )
+    return report
+
+
+# ---------------------------------------------------------------------------------------------------------------
 # Business catalog (AD-03)
 # ---------------------------------------------------------------------------------------------------------------
 
@@ -329,13 +412,17 @@ def _run(r: SyncRun) -> dict[str, Any]:
 
 @router.post("/sync")
 async def sync_now(
-    principal: Principal = Depends(require("admin.sync")), db: AsyncSession = Depends(db_session)
+    full: bool = Query(False, description="Re-read every claim in the look-back window, not only changes"),
+    principal: Principal = Depends(require("admin.sync")),
+    db: AsyncSession = Depends(db_session),
 ) -> dict[str, Any]:
     async with audit.audit_transaction(db):
-        await audit.record(db, principal.actor, "admin.sync_requested", "sync", "manual")
+        await audit.record(db, principal.actor, "admin.sync_requested", "sync", "manual", detail={"full": full})
     clear_reference_cache()
     try:
-        run = await run_sync(db, get_connector(), principal.user.tenant_id, clock.today(), kind="manual")
+        run = await run_sync(
+            db, get_connector(), principal.user.tenant_id, clock.today(), kind="manual", force_full=full
+        )
     except Exception as exc:
         raise HTTPException(
             status.HTTP_502_BAD_GATEWAY,

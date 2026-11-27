@@ -34,4 +34,10 @@ export const LIST_LABELS: Record<string, string> = {
   balance_due: "Balance due",
 };
 
+/** US phone for display: "7085550124" → "(708) 555-0124". Anything else is shown as stored. */
+export function phone(value: string | null | undefined): string {
+  const digits = (value ?? "").replace(/\D/g, "");
+  if (digits.length !== 10) return value ?? "No number on file";
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
 export const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;

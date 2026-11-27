@@ -73,7 +73,7 @@
   --lv-success-soft: 18 56 47;
   --lv-attention: 247 162 92;
   --lv-attention-soft: 61 42 23;
-  --lv-rejected: 249 112 102;
+  --lv-rejected: 255 138 128; /* ≥ 4.5:1 on every dark surface, incl. the selected row */
   --lv-rejected-soft: 62 29 27;
   --lv-info: 132 173 255;
   --lv-info-soft: 23 41 74;

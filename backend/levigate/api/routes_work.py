@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from levigate import ai, audit, catalog, clock
@@ -58,14 +58,6 @@ def _effective_due(item: WorkItem) -> date:
     if item.status == WorkItemStatus.AWAITING_FOLLOWUP and item.next_followup_date:
         return item.next_followup_date
     return item.due_date
-
-
-def _sort_key(item: WorkItem, today: date) -> tuple:
-    """Urgency, then dollars: overdue items first (largest amount first), then by due date and amount."""
-    due = _effective_due(item)
-    if due < today:
-        return (0, 0, -float(item.amount_at_risk))
-    return (1, (due - today).days, -float(item.amount_at_risk))
 
 
 def _visible_queues(principal: Principal) -> frozenset[str]:
@@ -164,11 +156,39 @@ async def _queue_items(
         dict((await db.execute(select(WorkItem.type, func.count()).where(flt).group_by(WorkItem.type))).all())
     )
     q = select(WorkItem).where(flt)
+    total = sum(counts.values())
     if item_type:
         q = q.where(WorkItem.type == item_type)
-    rows = (await db.scalars(q)).all()  # sorted in Python: the effective due date depends on status
-    ordered = sorted(rows, key=lambda i: _sort_key(i, today))
-    return ordered[offset : offset + limit], counts, len(rows)
+        total = counts.get(item_type, 0)
+    page = (await db.scalars(q.order_by(*_queue_order(today)).offset(offset).limit(limit))).all()
+    return list(page), counts, total
+
+
+def _queue_order(today: date) -> tuple[Any, ...]:
+    """Urgency, then dollars: overdue items first (largest amount first), then soonest due, then largest amount.
+    Equal amounts go longest-waiting first, then by Rx and fill number.
+
+    Sorted in the database so a large queue only loads the page it shows. The due date is the follow-up date for
+    items waiting on a follow-up, else the item's own due date."""
+    due = case(
+        (
+            and_(WorkItem.status == WorkItemStatus.AWAITING_FOLLOWUP, WorkItem.next_followup_date.is_not(None)),
+            WorkItem.next_followup_date,
+        ),
+        else_=WorkItem.due_date,
+    )
+    overdue = due < today
+    return (
+        case((overdue, 0), else_=1),
+        case((overdue, today), else_=due),
+        WorkItem.amount_at_risk.desc(),
+        # Ties: the longest-waiting first, then business keys, so the order never depends on load order.
+        due,
+        WorkItem.rx_number,
+        WorkItem.fill_number,
+        WorkItem.type,
+        WorkItem.id,
+    )
 
 
 def _week_start(today: date) -> date:

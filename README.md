@@ -7,17 +7,20 @@ eligible patient gets a timely refill call, every prescriber is tracked and nurt
 the HIPAA and TCPA controls are working. Rules decide; the AI only explains and drafts; a named person approves.
 
 The full requirements live in [`docs/requirements.md`](docs/requirements.md), the brand in
-[`docs/brand/README.md`](docs/brand/README.md), and what is built so far in [`docs/STATUS.md`](docs/STATUS.md).
+[`docs/brand/README.md`](docs/brand/README.md), what is built so far in [`docs/STATUS.md`](docs/STATUS.md), how a
+client's warehouse is connected in [`docs/data-integration.md`](docs/data-integration.md), and the test evidence in
+[`docs/readiness-report.md`](docs/readiness-report.md).
 
 ## What's here
 
 | Path | What it is |
 | --- | --- |
 | `backend/` | FastAPI service (Python 3.13, async SQLAlchemy). Connector layer, business catalog, rules engine, sync, AI service, audit log, API. |
-| `backend/levigate/demo/` | Synthetic client warehouse (≈2,000 patients, 150 prescribers, 6 months of fills) and the one-command demo reset. |
+| `backend/levigate/sources/` | Source profiles: how a client's own tables (and BI views) map onto Levigate's relations. |
+| `backend/levigate/demo/` | Synthetic client warehouse (≈2,000 patients, 150 prescribers, 6 months of fills) in two layouts — Levigate's reference tables, or a pharmacy system's tables as Talend lands them, mess included — and the one-command demo reset. |
 | `frontend/` | React + TypeScript + Tailwind app on the Levigate design system (tokens, icons, motion, charts). |
-| `docs/` | Requirements, brand guide, build status. |
-| `.github/workflows/ci.yml` | Lint, types, tests (SQLite + PostgreSQL), dependency audits, secret scanning, image scanning, e2e smoke. |
+| `docs/` | Requirements, brand guide, build status, client data integration guide, readiness report. |
+| `.github/workflows/ci.yml` | Lint, types, tests on every warehouse layout (SQLite + PostgreSQL), dependency audits, secret scanning, image scanning, e2e smoke, role journeys and accessibility. |
 
 ## Run the demo
 
@@ -49,9 +52,17 @@ Open http://localhost:5173 and choose a demo user. Each role sees only what it i
 | Ana Ruiz | Outreach | Call lists: consent and the 90-day lapse rule applied, scripts, outcomes |
 | Marcus Lee | Marketing | Prescribers → Declining → Dr. Elena Marsh |
 | Priya Shah | Pharmacist | DUR rejects routed to the pharmacist queue |
-| Sam Okafor / Alex Chen | Admin | Business catalog (changes need a second admin), users, connections, sync |
+| Sam Okafor / Alex Chen | Admin | Data source (mapping, data checks, BI comparison), business catalog (changes need a second admin), users, sync |
 | Dana Whitfield | Auditor | Compliance Center, audit log, one-click audit pack |
 | Ravi Kumar | Billing, offshore | Same queue with PHI masked (C-11) |
+
+To run on a client-style warehouse instead — a pharmacy system's normalised tables landed by Talend, with reload
+duplicates, voided fills, split 835 payments and BI views — set the source profile in both terminals before
+`make demo` and `make api`:
+
+```bash
+export LEVIGATE_SOURCE_PROFILE=pms_snowflake
+```
 
 Or run the whole stack — PostgreSQL, API and web — in Docker on http://localhost:8080:
 
@@ -73,12 +84,22 @@ make lint
 ```
 
 ```bash
+make test-all
+```
+
+```bash
 make e2e
 ```
 
-`make e2e` walks the client demo script in a real browser against a freshly reset demo (`make demo`, then
+```bash
+make journeys
+```
+
+`make test-all` runs the backend suite once per warehouse layout. `make e2e` walks the client demo script in a real browser against a freshly reset demo (`make demo`, then
 `make api` and `make web`). Set `LEVIGATE_TEST_PG_URL=postgresql+asyncpg://…` to also run the PostgreSQL checks
-(append-only audit table, hash chain under concurrent writers from several processes).
+(append-only audit table, hash chain under concurrent writers from several processes). `make journeys` signs in as
+every demo user, does each role's daily work, checks each is refused outside its role, and scans every screen for
+WCAG 2.1 A/AA issues in light and dark (run it on a fresh `make demo` with the API restarted).
 
 Configuration is environment-only (`LEVIGATE_*`); see [`backend/.env.example`](backend/.env.example).
 

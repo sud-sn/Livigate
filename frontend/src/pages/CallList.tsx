@@ -1,14 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Eye, Phone, PhoneOff } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router";
 import { PageHeader } from "@/app/Shell";
 import { cn } from "@/design-system/cn";
 import { PharmacyIcon } from "@/design-system/icons";
 import { AiDraftPanel, Tooltip, useToast, type AiDraftData } from "@/design-system/overlays";
 import { Badge, Button, Card, EmptyState, ErrorNote, Field, SkeletonRows, Tabs, Textarea } from "@/design-system/primitives";
 import { api } from "@/lib/api";
-import { count, LIST_LABELS, money, relativeDays, shortDate } from "@/lib/format";
+import { count, LIST_LABELS, money, phone, relativeDays, shortDate } from "@/lib/format";
 import { useShortcuts } from "@/lib/keys";
 
 type ListType = "refill_due" | "adherence_gap" | "ready_for_pickup" | "balance_due";
@@ -114,7 +114,7 @@ export default function CallList() {
   });
   const reveal = useMutation({
     mutationFn: (pid: string) => api<{ first_name: string; last_name: string; phone: string; dob: string }>(`/api/patients/${pid}/reveal`, { method: "POST" }),
-    onSuccess: (r, pid) => setRevealed((m) => ({ ...m, [pid]: `${r.first_name} ${r.last_name} · ${r.phone} · DOB ${r.dob}` })),
+    onSuccess: (r, pid) => setRevealed((m) => ({ ...m, [pid]: `${r.first_name} ${r.last_name} · ${phone(r.phone)} · DOB ${r.dob}` })),
     onError: (err) => toast({ tone: "error", text: (err as Error).message }),
   });
 
@@ -141,7 +141,7 @@ export default function CallList() {
               ) : entries.length === 0 ? (
                 <EmptyState title={`No one on the ${LIST_LABELS[listType].toLowerCase()} list right now.`} action={{ label: "Check the adherence gap list", to: "/outreach?list=adherence_gap" }} />
               ) : (
-                <div className="max-h-[62vh] overflow-auto">
+                <div role="region" aria-label="Patients on this list" tabIndex={0} className="max-h-[62vh] overflow-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-teal">
                   <table className="w-full min-w-[640px] text-sm">
                     <thead className="sticky top-0 z-10 bg-mist text-left text-xs text-muted">
                       <tr>

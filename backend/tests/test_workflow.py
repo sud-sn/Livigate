@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
+
+from levigate.demo.warehouse import record_upstream_payment
 
 
 def _queue_items(billing, item_type: str) -> list[dict]:  # type: ignore[no-untyped-def]
@@ -88,16 +91,12 @@ def test_approval_is_named_audited_idempotent_and_not_optimistic(login, app_db) 
     )
 
 
-def test_reconciliation_resolves_and_counts_recovered(login, warehouse_db) -> None:  # type: ignore[no-untyped-def]
+def test_reconciliation_resolves_and_counts_recovered(login, env_paths, demo) -> None:  # type: ignore[no-untyped-def]
     admin = login("u-admin")
     before = admin.get("/api/dashboard").json()
     recovered_before = next(m for m in before["metrics"] if m["key"] == "dollars_recovered")["value"]
-    # The payer pays the resubmitted claim upstream.
-    warehouse_db.execute(
-        "INSERT INTO FACT_CLAIM VALUES ('CL-TEST-1','F4471-02','4471',2,'PY01','2026-11-27T09:00:00','P',NULL,NULL,"
-        "80.0,68.0,68.0,'2026-11-27T09:00:05','2026-11-27T09:30:00','2099-01-01T00:00:00')"
-    )
-    warehouse_db.commit()
+    # The payer pays the resubmitted claim upstream; the next warehouse load lands it.
+    record_upstream_payment(env_paths["warehouse"], demo["layout"], "4471", 2, 68.0, datetime(2026, 11, 27, 9, 30))
     run = admin.post("/api/admin/sync").json()
     assert run["status"] == "ok" and all(s["status"] == "done" for s in run["steps"])
     assert run["stats"]["resolved"] >= 1
@@ -108,13 +107,13 @@ def test_reconciliation_resolves_and_counts_recovered(login, warehouse_db) -> No
     assert round(recovered_after - recovered_before, 2) == 68.0
 
 
-def test_claims_tracker_counts_match_source(login, warehouse_db) -> None:  # type: ignore[no-untyped-def]
+def test_claims_tracker_counts_match_source(login, canonical_sql) -> None:  # type: ignore[no-untyped-def]
     billing = login("u-billing")
     data = billing.get("/api/claims", params={"start": "2026-11-01", "end": "2026-11-27", "limit": 10}).json()
-    source = warehouse_db.execute(
+    source = canonical_sql(
         "SELECT COUNT(DISTINCT FILL_ID) FROM FACT_RXFILL WHERE FILL_DATE BETWEEN '2026-11-01' AND '2026-11-27' "
         "AND FILL_ID IN (SELECT FILL_ID FROM FACT_CLAIM)"
-    ).fetchone()[0]
+    )[0][0]
     assert data["total"] == source == sum(data["counts"].values())
     rejected = billing.get(
         "/api/claims", params={"start": "2026-11-01", "end": "2026-11-27", "status": "rejected"}

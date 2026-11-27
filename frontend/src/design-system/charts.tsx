@@ -88,7 +88,7 @@ export function ChartFrame({ title, data, format, children, caption }: {
       {view === "chart" ? (
         children
       ) : (
-        <div className="max-h-64 overflow-auto rounded-md border border-line">
+        <div role="region" aria-label="Chart data" tabIndex={0} className="max-h-64 overflow-auto rounded-md border border-line focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-teal">
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-mist text-left text-xs text-muted">
               <tr>

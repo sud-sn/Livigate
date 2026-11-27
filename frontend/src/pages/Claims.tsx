@@ -1,7 +1,7 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Download, ExternalLink } from "lucide-react";
 import { useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router";
 import { PageHeader } from "@/app/Shell";
 import { cn } from "@/design-system/cn";
 import { ConfirmDialog, useToast } from "@/design-system/overlays";
@@ -146,7 +146,7 @@ export default function Claims() {
           ) : d.rows.length === 0 ? (
             <EmptyState title="No claims match these filters." action={{ label: "Clear filters", to: "/claims" }} />
           ) : (
-            <div className={cn("max-h-[65vh] overflow-auto transition-opacity", data.isFetching && "opacity-70")}>
+            <div role="region" aria-label="Claims" tabIndex={0} className={cn("max-h-[65vh] overflow-auto transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-teal", data.isFetching && "opacity-70")}>
               <table className="w-full min-w-[980px] text-sm">
                 <thead className="sticky top-0 z-10 bg-mist text-left text-xs text-muted">
                   <tr>

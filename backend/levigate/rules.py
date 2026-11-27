@@ -359,7 +359,7 @@ def refill_bucket(candidate: Mapping[str, Any], today: date, rule: Mapping[str, 
     return None, due
 
 
-def contact_eligibility(*, consent_granted: bool, opted_out: bool, lapsed: bool) -> Eligibility:
+def contact_eligibility(*, consent_granted: bool, opted_out: bool, lapsed: bool, has_phone: bool = True) -> Eligibility:
     reasons = []
     if lapsed:
         reasons.append("Prescription lapsed over 90 days (C-10)")
@@ -367,6 +367,8 @@ def contact_eligibility(*, consent_granted: bool, opted_out: bool, lapsed: bool)
         reasons.append("Patient opted out of calls")
     elif not consent_granted:
         reasons.append("No call consent on file (C-09)")
+    if not has_phone:
+        reasons.append("No phone number on file — add one in the pharmacy system")
     return Eligibility(not reasons, reasons)
 
 
@@ -426,7 +428,8 @@ def score_prescribers(rows: Sequence[Mapping[str, Any]], body: Mapping[str, Any]
                 and trend <= -float(body.get("declining_drop", 0.3)),
             }
         )
-    ranked = sorted((p for p in out if int(p["RX_90"] or 0) > 0), key=lambda p: -p["SCORE"])
+    # Equal scores rank by prescriber ID, so the top-N cut never depends on source row order.
+    ranked = sorted((p for p in out if int(p["RX_90"] or 0) > 0), key=lambda p: (-p["SCORE"], str(p["PRESCRIBER_ID"])))
     top_ids = {p["PRESCRIBER_ID"] for p in ranked[: int(body.get("top_n", 25))]}
     for p in out:
         p["IS_TOP"] = p["PRESCRIBER_ID"] in top_ids

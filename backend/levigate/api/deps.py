@@ -134,6 +134,7 @@ def require(permission: str) -> Callable[..., Coroutine[Any, Any, Principal]]:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Your role does not have access to this.")
         return principal
 
+    _dep.permission = permission  # type: ignore[attr-defined]  # read by the route x role test matrix
     return _dep
 
 

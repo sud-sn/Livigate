@@ -14,17 +14,18 @@ from levigate.connectors import ConnectorError, ReadOnlyConnector
 
 
 @pytest.fixture
-def connector(env_paths) -> ReadOnlyConnector:  # type: ignore[no-untyped-def]
-    return ReadOnlyConnector(f"sqlite:///{env_paths['warehouse']}")
+def connector(env_paths, profile) -> ReadOnlyConnector:  # type: ignore[no-untyped-def]
+    return ReadOnlyConnector(f"sqlite:///{env_paths['warehouse']}", profile=profile)
 
 
 def run(coro):  # type: ignore[no-untyped-def]
     return asyncio.run(coro)
 
 
-def test_named_query_runs(connector: ReadOnlyConnector) -> None:
-    rows = run(connector.fetch("claims_for_fills", fill_ids=["F4471-02"]))
+def test_named_query_runs(connector: ReadOnlyConnector, demo) -> None:  # type: ignore[no-untyped-def]
+    rows = run(connector.fetch("claims_for_fills", fill_ids=[demo["story"]["rx_4471_fill_id"]]))
     assert rows and rows[0]["REJECT_CODE"] == "79"
+    assert rows[0]["RX_NUMBER"] == "4471" and int(rows[0]["FILL_NUMBER"]) == 2
 
 
 def test_unknown_query_is_refused(connector: ReadOnlyConnector) -> None:
@@ -48,10 +49,12 @@ def test_injection_text_is_bound_not_interpolated(connector: ReadOnlyConnector) 
 
 
 def test_warehouse_is_opened_read_only(connector: ReadOnlyConnector, env_paths) -> None:  # type: ignore[no-untyped-def]
+    # A table that exists in this layout's raw warehouse: writes must be refused at the driver.
+    raw_table = "DIM_PAYER" if connector.profile.name == "canonical" else "PAYER"
     with connector.engine.connect() as conn, pytest.raises(OperationalError, match="readonly"):
-        conn.execute(text("DELETE FROM DIM_PAYER"))
+        conn.execute(text(f"DELETE FROM {raw_table}"))  # noqa: S608
     with sqlite3.connect(env_paths["warehouse"]) as con:
-        assert con.execute("SELECT COUNT(*) FROM DIM_PAYER").fetchone()[0] > 0
+        assert con.execute(f"SELECT COUNT(*) FROM {raw_table}").fetchone()[0] > 0  # noqa: S608
 
 
 def test_host_not_on_allow_list_is_refused() -> None:

@@ -1,16 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Database, History, PlugZap, RefreshCw, XCircle } from "lucide-react";
 import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router";
 import { PageHeader } from "@/app/Shell";
 import { cn } from "@/design-system/cn";
 import { Dialog, ProcessSteps, useToast, type Step } from "@/design-system/overlays";
 import { Badge, Button, Card, ErrorNote, Field, Input, Select, SkeletonRows, StatTile, Tabs, Textarea } from "@/design-system/primitives";
 import { api } from "@/lib/api";
+import { DataSourceTab } from "@/pages/AdminDataSource";
 import { useMe } from "@/lib/auth";
 import { dateTime } from "@/lib/format";
 
-type Tab = "users" | "connections" | "catalog" | "sync";
+type Tab = "users" | "connections" | "data" | "catalog" | "sync";
 const ROLES = ["billing", "outreach", "marketing", "pharmacist", "admin", "auditor"];
 
 export default function Admin() {
@@ -18,12 +19,13 @@ export default function Admin() {
   const tab = (params.get("tab") as Tab) || "users";
   return (
     <>
-      <PageHeader title="Admin" subtitle="Users and roles, data connections, the business catalog and sync." />
+      <PageHeader title="Admin" subtitle="Users and roles, data connections and mapping, the business catalog and sync." />
       <Tabs label="Admin sections" value={tab} onChange={(v) => setParams({ tab: v })}
-        tabs={[{ value: "users", label: "Users and roles" }, { value: "connections", label: "Data connections" }, { value: "catalog", label: "Business catalog" }, { value: "sync", label: "Sync and health" }]} />
+        tabs={[{ value: "users", label: "Users and roles" }, { value: "connections", label: "Data connections" }, { value: "data", label: "Data source" }, { value: "catalog", label: "Business catalog" }, { value: "sync", label: "Sync and health" }]} />
       <div className="mt-5">
         {tab === "users" && <Users />}
         {tab === "connections" && <Connections />}
+        {tab === "data" && <DataSourceTab />}
         {tab === "catalog" && <Catalog />}
         {tab === "sync" && <Sync />}
       </div>
@@ -178,11 +180,11 @@ function EntryDialog({ entry, onClose }: { entry: Entry; onClose: () => void }) 
   });
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()} title={`${entry.title} (${entry.key})`} wide description={`Catalog part: ${entry.kind.replaceAll("_", " ")}`}>
-      <div className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto pr-1">
+      <div role="region" aria-label="Catalog entry" tabIndex={0} className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto pr-1 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-teal">
         {pending ? (
           <div className="rounded-md border border-attention/30 bg-attention-soft p-3 text-sm">
             <p className="font-semibold">v{pending.version} is waiting for approval — proposed by {pending.created_by}: “{pending.change_note}”</p>
-            <pre className="mt-2 max-h-40 overflow-auto rounded bg-surface p-2 text-xs">{JSON.stringify(pending.body, null, 2)}</pre>
+            <pre tabIndex={0} aria-label="Proposed rule body" className="mt-2 max-h-40 overflow-auto rounded bg-surface p-2 text-xs focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-teal">{JSON.stringify(pending.body, null, 2)}</pre>
             {pending.created_by !== me.name && <Button className="mt-2" variant="primary" size="sm" busy={approve.isPending} busyLabel="Approving…" onClick={() => approve.mutate(pending.id)}>Approve v{pending.version}</Button>}
           </div>
         ) : (
@@ -221,7 +223,7 @@ function Sync() {
   const health = useQuery({ queryKey: ["admin-health"], queryFn: () => api<Health>("/api/admin/health") });
   const runs = useQuery({ queryKey: ["admin-runs"], queryFn: () => api<Run[]>("/api/admin/sync/runs") });
   const run = useMutation({
-    mutationFn: () => api<Run>("/api/admin/sync", { method: "POST" }),
+    mutationFn: (full: boolean) => api<Run>(`/api/admin/sync${full ? "?full=true" : ""}`, { method: "POST" }),
     onSettled: () => { void qc.invalidateQueries({ queryKey: ["admin-runs"] }); void qc.invalidateQueries({ queryKey: ["admin-health"] }); void qc.invalidateQueries({ queryKey: ["queue"] }); },
   });
   const pendingSteps: Step[] = [
@@ -229,6 +231,8 @@ function Sync() {
     { key: "rules", label: "Reject-code rules applied", status: "pending" },
     { key: "items", label: "Building work items", status: "pending" },
     { key: "reconcile", label: "Reconciled with source", status: "pending" },
+    { key: "consent", label: "Consent synced from the pharmacy system", status: "pending" },
+    { key: "quality", label: "Data checks", status: "pending" },
   ];
   const h = health.data;
   return (
@@ -245,14 +249,14 @@ function Sync() {
             <table className="w-full min-w-[640px] text-sm">
               <thead className="bg-mist text-left text-xs text-muted"><tr>
                 <th className="px-4 py-2 font-semibold">Started</th><th className="px-4 py-2 font-semibold">Kind</th><th className="px-4 py-2 font-semibold">Status</th>
-                <th className="px-4 py-2 text-right font-semibold">Rows</th><th className="px-4 py-2 text-right font-semibold">Created</th><th className="px-4 py-2 text-right font-semibold">Closed</th>
+                <th className="px-4 py-2 font-semibold">Scope</th><th className="px-4 py-2 text-right font-semibold">Rows</th><th className="px-4 py-2 text-right font-semibold">Created</th><th className="px-4 py-2 text-right font-semibold">Closed</th>
               </tr></thead>
               <tbody className="divide-y divide-line">
                 {runs.data.map((r) => (
                   <tr key={r.id}>
                     <td className="px-4 py-2">{dateTime(r.started_at)}</td><td className="px-4 py-2 capitalize">{r.kind}</td>
                     <td className="px-4 py-2"><Badge tone={r.status === "ok" ? "success" : r.status === "failed" ? "rejected" : "info"}>{r.status}</Badge></td>
-                    <td className="tabular px-4 py-2 text-right">{r.stats.rows ?? "—"}</td><td className="tabular px-4 py-2 text-right">{r.stats.created ?? "—"}</td>
+                    <td className="px-4 py-2 text-muted">{r.stats.full_scan ? "Full" : "Changes"}</td><td className="tabular px-4 py-2 text-right">{r.stats.rows ?? "—"}</td><td className="tabular px-4 py-2 text-right">{r.stats.created ?? "—"}</td>
                     <td className="tabular px-4 py-2 text-right">{(r.stats.resolved ?? 0) + (r.stats.closed_upstream ?? 0)}</td>
                   </tr>
                 ))}
@@ -263,11 +267,14 @@ function Sync() {
       </div>
       <Card className="flex flex-col gap-4 p-5">
         <h2 className="text-base">Run a sync now</h2>
-        <p className="text-sm text-muted">Pulls changed claims, applies the playbook, builds work items and reconciles open items with the source. Scheduled runs happen automatically.</p>
+        <p className="text-sm text-muted">Pulls changed claims, applies the playbook, builds work items, reconciles open items with the source, imports consent and runs the data checks. Scheduled runs happen automatically; the first run of each day re-reads everything.</p>
         {run.isPending ? <ProcessSteps steps={pendingSteps} /> : run.data ? <ProcessSteps steps={run.data.steps} /> : null}
         {run.data && <p className="text-sm">Created {run.data.stats.created}, re-routed {run.data.stats.updated}, resolved {run.data.stats.resolved}, closed upstream {run.data.stats.closed_upstream}.</p>}
         {run.error && <ErrorNote error={run.error} />}
-        <Button variant="primary" icon={RefreshCw} busy={run.isPending} busyLabel="Syncing…" onClick={() => run.mutate()}>Run sync</Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="primary" icon={RefreshCw} busy={run.isPending && run.variables === false} busyLabel="Syncing…" disabled={run.isPending} onClick={() => run.mutate(false)}>Run sync</Button>
+          <Button icon={History} busy={run.isPending && run.variables === true} busyLabel="Re-reading…" disabled={run.isPending} onClick={() => run.mutate(true)}>Full re-read</Button>
+        </div>
       </Card>
     </div>
   );

@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { BarChart3, Keyboard, LogOut, Moon, Search, Settings2, Sun } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useNavigate } from "react-router";
 import { cn } from "@/design-system/cn";
 import { PharmacyIcon, type PharmacyIconName } from "@/design-system/icons";
 import { Wordmark } from "@/design-system/Mark";

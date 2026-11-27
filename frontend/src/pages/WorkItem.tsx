@@ -1,14 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, Eye, Pencil, PhoneForwarded } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router";
 import { cn } from "@/design-system/cn";
 import { PharmacyIcon } from "@/design-system/icons";
 import { AiDraftPanel, ConfirmDialog, SuccessChip, Tooltip, useToast, type AiDraftData } from "@/design-system/overlays";
 import { Button, Card, ErrorNote, Field, Input, Select, SkeletonRows, Textarea } from "@/design-system/primitives";
 import { api, newIdempotencyKey } from "@/lib/api";
 import { useMe } from "@/lib/auth";
-import { dateTime, longDate, money, shortDate } from "@/lib/format";
+import { dateTime, longDate, money, phone, shortDate } from "@/lib/format";
 import { useShortcuts } from "@/lib/keys";
 import { TypeBadge, type QueueItem } from "./MyQueue";
 
@@ -290,7 +290,7 @@ export default function WorkItem() {
             <div className="border-t border-line pt-3">
               <p className="flex items-center gap-2 font-semibold"><PharmacyIcon name="patient" size={16} className="text-teal" />Patient</p>
               {revealed ? (
-                <p className="mt-1">{revealed.first_name} {revealed.last_name} · DOB {revealed.dob} · {revealed.phone}<br />
+                <p className="mt-1">{revealed.first_name} {revealed.last_name} · DOB {revealed.dob} · {phone(revealed.phone)}<br />
                   <span className="text-xs text-subtle">Viewing recorded on the audit trail.</span></p>
               ) : (
                 <div className="mt-1 flex items-center justify-between gap-2">

@@ -66,3 +66,18 @@ def test_call_requires_consent_outcome_and_honours_opt_out(login) -> None:  # ty
 def test_marketing_cannot_reach_outreach(login) -> None:  # type: ignore[no-untyped-def]
     marketing = login("u-marketing")
     assert marketing.get("/api/outreach/lists").status_code == 403
+
+
+def test_every_patient_on_a_call_list_can_be_called(login) -> None:  # type: ignore[no-untyped-def]
+    """Patients with no usable phone number are listed under exclusions with the reason, never as calls to make."""
+    outreach = login("u-outreach")
+    no_phone_reason = "No phone number on file — add one in the pharmacy system"
+    excluded_for_phone = 0
+    for list_type in ("refill_due", "adherence_gap", "ready_for_pickup", "balance_due"):
+        data = outreach.get("/api/outreach/lists", params={"list_type": list_type}).json()
+        assert all(e["patient"]["phone"] != "••••" for e in data["entries"]), list_type
+        for e in data["exclusions"]:
+            if no_phone_reason in e["reasons"]:
+                excluded_for_phone += 1
+                assert e["patient"]["phone"] == "••••"
+    assert excluded_for_phone > 0, "the demo data has patients without a phone; some must be due for a call"

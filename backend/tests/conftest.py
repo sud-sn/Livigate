@@ -1,6 +1,15 @@
 """Test environment: a fresh synthetic warehouse and app database per test session, driven through the real app.
 
 Nothing here talks to a real client system; every patient and prescriber is generated.
+
+``LEVIGATE_TEST_PROFILE`` picks the warehouse layout the whole suite runs against:
+
+* ``canonical`` (default) — the warehouse holds Levigate's seven canonical relations directly;
+* ``pms_snowflake`` — a client's normalised pharmacy-system tables as Talend lands them in Snowflake (reload
+  duplicates, soft deletes, split 835 payments, COB claims, …), mapped by the source profile;
+* ``pms_snowflake_bi`` — the same tables, with expected reimbursement read from the client's own BI view.
+
+CI runs the suite once per profile; every test must pass on all of them.
 """
 
 from __future__ import annotations
@@ -8,14 +17,34 @@ from __future__ import annotations
 import asyncio
 import os
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
 TODAY = date(2026, 11, 27)
+PROFILE = os.environ.get("LEVIGATE_TEST_PROFILE", "canonical")
+
+
+def pytest_report_header() -> str:
+    return f"levigate source profile: {PROFILE}"
+
+
+@pytest.fixture(scope="session")
+def profile() -> str:
+    return PROFILE
+
+
+@pytest.fixture(scope="session")
+def demo(env_paths: dict[str, Path]) -> dict[str, Any]:
+    """What the demo reset reported: the scripted story (fills used by the demo script), injected mess, …"""
+    return _DEMO
+
+
+_DEMO: dict[str, Any] = {}
 
 
 @pytest.fixture(scope="session")
@@ -29,6 +58,7 @@ def env_paths(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
             "LEVIGATE_WAREHOUSE_URL": f"sqlite:///{paths['warehouse']}",
             "LEVIGATE_SYNC_ENABLED": "false",
             "LEVIGATE_RATE_LIMIT_PER_MINUTE": "100000",
+            "LEVIGATE_SOURCE_PROFILE": PROFILE,
         }
     )
     from levigate import clock
@@ -38,7 +68,7 @@ def env_paths(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
     clock.set_today(TODAY)
     from levigate.demo.seed import reset_demo
 
-    asyncio.run(reset_demo(get_settings(), today=TODAY, n_patients=600, n_prescribers=40))
+    _DEMO.update(asyncio.run(reset_demo(get_settings(), today=TODAY, n_patients=600, n_prescribers=40)))
     return paths
 
 
@@ -105,3 +135,16 @@ def warehouse_db(env_paths: dict[str, Path]) -> Iterator[sqlite3.Connection]:
     con.row_factory = sqlite3.Row
     yield con
     con.close()
+
+
+@pytest.fixture
+def canonical_sql(warehouse_db: sqlite3.Connection) -> Callable[..., list[sqlite3.Row]]:
+    """Run SQL written against the canonical relations on whatever layout the warehouse has (via the profile)."""
+    from levigate.sources import compose, get_profile
+
+    profile = get_profile(PROFILE)
+
+    def _run(sql: str, params: tuple | dict = ()) -> list[sqlite3.Row]:
+        return warehouse_db.execute(compose(sql, profile, materialize=True), params).fetchall()
+
+    return _run

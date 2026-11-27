@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDownRight, ArrowLeft, ArrowUpRight, Mail, Minus, NotebookPen } from "lucide-react";
 import { useMemo, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { PageHeader } from "@/app/Shell";
 import { ChartFrame, LineChart, Sparkline } from "@/design-system/charts";
 import { cn } from "@/design-system/cn";
@@ -72,7 +72,7 @@ export function PrescriberList() {
         ) : rows.length === 0 ? (
           <EmptyState title="No prescribers in this list." action={{ label: "See all prescribers", to: "/prescribers?segment=all" }} />
         ) : (
-          <div className="max-h-[68vh] overflow-auto">
+          <div role="region" aria-label="Prescriber list" tabIndex={0} className="max-h-[68vh] overflow-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-teal">
             <table className="w-full min-w-[960px] text-sm">
               <thead className="sticky top-0 z-10 bg-mist text-left text-xs text-muted">
                 <tr>

@@ -172,3 +172,8 @@ def test_prescriber_segments() -> None:
     assert out["B"]["IS_TOP"] and not out["A"]["IS_TOP"]
     assert out["C"]["IS_NEW"]
     assert out["D"]["IS_DORMANT"]
+
+
+def test_patient_without_a_phone_is_not_callable() -> None:
+    elig = contact_eligibility(consent_granted=True, opted_out=False, lapsed=False, has_phone=False)
+    assert not elig.eligible and elig.reasons == ["No phone number on file — add one in the pharmacy system"]

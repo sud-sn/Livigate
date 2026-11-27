@@ -178,8 +178,10 @@ async def ranked(
     if q:
         needle = q.lower()
         scored = [p for p in scored if needle in prescriber_name(p).lower() or needle in p["PRACTICE_NAME"].lower()]
-    key = (lambda p: p["TREND"]) if segment == "declining" else (lambda p: -p["SCORE"])
-    scored.sort(key=key)
+    if segment == "declining":
+        scored.sort(key=lambda p: (p["TREND"], str(p["PRESCRIBER_ID"])))
+    else:
+        scored.sort(key=lambda p: (-p["SCORE"], str(p["PRESCRIBER_ID"])))
     rows = [_row(p, owners, names, last, rejects) for p in scored[:200]]
     return {"segment": segment, "counts": counts, "formula": formula, "rows": [r.model_dump() for r in rows]}
 

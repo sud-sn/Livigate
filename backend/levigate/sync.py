@@ -1,6 +1,11 @@
 """Sync model: scheduled pull → rules → work items, plus reconciliation against the source.
 
 * Scheduled pull (every 15 minutes, configurable): claims whose latest state changed since the last watermark.
+  The watermark is the source's own change marker (e.g. Talend's LOAD_TS), re-read with a 30-minute overlap.
+* Full scan: the first run of each business day, and at least every 24 hours. A claim's status also depends on the
+  date (a claim with no payment becomes past due when the payer's window ends), and that changes nothing in the
+  source, so an incremental pull alone would never see it. Status is computed per business day, so one full scan
+  per day is exactly enough.
 * Reconciliation (every run, cheap at pilot scale): every open work item is re-checked against its source fill;
   anything paid or reversed upstream closes automatically. Approved items that end up paid count as recovered.
 * The job runs as its own least-privilege service identity and writes to the audit log like a user does.
@@ -10,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -18,11 +23,12 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from levigate import audit, catalog
+from levigate import audit, catalog, quality
 from levigate.audit import Actor
 from levigate.connectors import ReadOnlyConnector
 from levigate.models import (
     OPEN_STATUSES,
+    Consent,
     SyncRun,
     WorkItem,
     WorkItemEvent,
@@ -39,6 +45,7 @@ from levigate.rules import (
     derive_status,
     playbook_fix,
     to_date,
+    to_datetime,
     underpaid_fix,
     unpaid_fix,
 )
@@ -53,7 +60,16 @@ STEP_LABELS = [
     ("rules", "Reject-code rules applied"),
     ("items", "Building work items"),
     ("reconcile", "Reconciled with source"),
+    ("consent", "Consent synced from the pharmacy system"),
+    ("quality", "Data checks"),
 ]
+
+# The incremental pull follows the *source's* change marker (e.g. Talend's LOAD_TS), not our own clock: a row that
+# lands late with an older timestamp must not be skipped. A small overlap re-reads the edge; a full scan of the
+# lookback window once a day is the safety net for anything an incremental pull could still miss.
+WATERMARK_OVERLAP = timedelta(minutes=30)
+FULL_SCAN_EVERY = timedelta(hours=24)
+EPOCH = "2000-01-01T00:00:00"
 
 
 def service_actor(tenant_id: str) -> Actor:
@@ -196,8 +212,68 @@ def _settle(session: AsyncSession, item: WorkItem, row: Mapping[str, Any], statu
     return item.status
 
 
+def _max_change(rows: Sequence[Mapping[str, Any]], column: str, cap: datetime) -> datetime | None:
+    """Newest change marker in the batch, ignoring timestamps in the future (bad source clocks)."""
+    newest = None
+    for r in rows:
+        ts = to_datetime(r.get(column))
+        if ts is None:
+            continue
+        ts = ts.replace(tzinfo=None)
+        if ts <= cap and (newest is None or ts > newest):
+            newest = ts
+    return newest
+
+
+async def _import_consent(
+    session: AsyncSession, connector: ReadOnlyConnector, tenant_id: str, since: str
+) -> tuple[int, list[dict[str, Any]]]:
+    """Bring consent recorded in the pharmacy system into Levigate.
+
+    A source change wins only if it is newer than what Levigate already holds: an opt-out taken on a Levigate call
+    stands until the pharmacy system records a newer consent for that channel.
+    """
+    rows = await connector.fetch("consent_changed_since", since=since)
+    if not rows:
+        return 0, rows
+    latest: dict[tuple[str, str], Consent] = {}
+    for c in (await session.scalars(select(Consent).where(Consent.tenant_id == tenant_id).order_by(Consent.id))).all():
+        latest[(c.patient_id, c.channel)] = c
+    imported = 0
+    for r in rows:
+        key = (str(r["PATIENT_ID"]), str(r["CHANNEL"]))
+        recorded = to_datetime(r["RECORDED_AT"])
+        if recorded is None or r["STATUS"] not in ("granted", "revoked"):
+            continue
+        recorded = recorded if recorded.tzinfo else recorded.replace(tzinfo=UTC)
+        current = latest.get(key)
+        if current is not None and (current.status == r["STATUS"] or as_utc(current.recorded_at) >= recorded):
+            continue
+        row = Consent(
+            tenant_id=tenant_id,
+            patient_id=key[0],
+            channel=key[1],
+            status=str(r["STATUS"]),
+            consent_type=str(r["CONSENT_TYPE"]),
+            source="pharmacy system",
+            recorded_at=recorded,
+            recorded_by=SERVICE_USER_ID,
+            synced_back_at=recorded if r["STATUS"] == "revoked" else None,
+        )
+        session.add(row)
+        latest[key] = row
+        imported += 1
+    return imported, rows
+
+
 async def run_sync(
-    session: AsyncSession, connector: ReadOnlyConnector, tenant_id: str, today: date, *, kind: str = "scheduled"
+    session: AsyncSession,
+    connector: ReadOnlyConnector,
+    tenant_id: str,
+    today: date,
+    *,
+    kind: str = "scheduled",
+    force_full: bool = False,
 ) -> SyncRun:
     actor = service_actor(tenant_id)
     run = SyncRun(
@@ -206,10 +282,12 @@ async def run_sync(
     session.add(run)
     await session.commit()
 
-    def step(key: str, status: str) -> None:
-        run.steps = [{**s, "status": status} if s["key"] == key else s for s in run.steps]
+    def step(key: str, status: str, label: str | None = None) -> None:
+        run.steps = [
+            {**s, "status": status, **({"label": label} if label else {})} if s["key"] == key else s for s in run.steps
+        ]
 
-    stats = {"rows": 0, "created": 0, "updated": 0, "resolved": 0, "closed_upstream": 0, "review": 0}
+    stats: dict[str, Any] = {"rows": 0, "created": 0, "updated": 0, "resolved": 0, "closed_upstream": 0, "review": 0}
     try:
         started = utcnow()
         ok, message = await connector.test()
@@ -217,19 +295,35 @@ async def run_sync(
             raise RuntimeError(f"warehouse connection failed: {message}")
         step("connect", "done")
 
-        previous = await session.scalar(
-            select(SyncRun.watermark)
-            .where(SyncRun.tenant_id == tenant_id, SyncRun.status == "ok")
-            .order_by(SyncRun.id.desc())
-            .limit(1)
+        recent = (
+            await session.scalars(
+                select(SyncRun)
+                .where(SyncRun.tenant_id == tenant_id, SyncRun.status == "ok")
+                .order_by(SyncRun.id.desc())
+                .limit(200)
+            )
+        ).all()
+        last_full = next((r for r in recent if (r.stats or {}).get("full_scan")), None)
+        full_scan = (
+            force_full
+            or last_full is None
+            or (last_full.stats or {}).get("business_date") != today.isoformat()
+            or started - as_utc(last_full.started_at) >= FULL_SCAN_EVERY
         )
-        since = (as_utc(previous) or datetime(2000, 1, 1, tzinfo=UTC)) - timedelta(minutes=5)
+        previous = recent[0] if recent else None
+        prev_mark = as_utc(previous.watermark) if previous and previous.watermark else None
+        since = (
+            EPOCH
+            if full_scan or prev_mark is None
+            else ((prev_mark - WATERMARK_OVERLAP).replace(tzinfo=None).isoformat(timespec="seconds"))
+        )
         rows = await connector.fetch(
-            "claims_changed_since",
-            since=since.replace(tzinfo=None).isoformat(timespec="seconds"),
-            min_fill_date=today - timedelta(days=LOOKBACK_DAYS),
+            "claims_changed_since", since=since, min_fill_date=today - timedelta(days=LOOKBACK_DAYS)
         )
-        stats["rows"] = len(rows)
+        cap = started.replace(tzinfo=None) + timedelta(days=1)
+        newest = _max_change(rows, "UPDATED_AT", cap)
+        mark = max(filter(None, [prev_mark.replace(tzinfo=None) if prev_mark else None, newest]), default=None)
+        stats.update(rows=len(rows), full_scan=full_scan, since=since, business_date=today.isoformat())
         rules = await _RuleSet.load(session, tenant_id)
         step("rules", "done")
 
@@ -261,8 +355,40 @@ async def run_sync(
                     stats["closed_upstream"] += 1
             step("reconcile", "done")
 
-            run.status, run.finished_at, run.stats, run.watermark = "ok", utcnow(), stats, started
-            await audit.record(session, actor, "sync.run", "sync_run", run.id, detail={"kind": kind, **stats})
+            prev_consent = (previous.stats or {}).get("consent_watermark") if previous and not full_scan else None
+            imported, consent_rows = await _import_consent(session, connector, tenant_id, prev_consent or EPOCH)
+            consent_mark = _max_change(consent_rows, "UPDATED_AT", cap)
+            stats["consent_imported"] = imported
+            stats["consent_watermark"] = consent_mark.isoformat(timespec="seconds") if consent_mark else prev_consent
+            step("consent", "done", f"Consent synced from the pharmacy system ({imported} changes)")
+
+            try:
+                checks = await quality.run_quality_checks(connector, today)
+                summary = quality.summarize(checks)
+                stats["quality"] = summary
+                stats["quality_findings"] = [
+                    {"key": c.key, "status": c.status, "count": c.count} for c in checks if c.status != "pass"
+                ]
+                label = (
+                    f"Data checks: {summary['fail']} failing, {summary['warn']} warnings"
+                    if summary["fail"] or summary["warn"]
+                    else "Data checks passed"
+                )
+                step("quality", "failed" if summary["fail"] else "done", label)
+            except Exception:  # data checks must never stop work items from being built
+                log.warning("data checks could not run during sync %s", run.id, exc_info=True)
+                step("quality", "failed", "Data checks could not run")
+
+            run.status, run.finished_at, run.stats = "ok", utcnow(), stats
+            run.watermark = mark.replace(tzinfo=UTC) if mark else None
+            await audit.record(
+                session,
+                actor,
+                "sync.run",
+                "sync_run",
+                run.id,
+                detail={"kind": kind, **{k: v for k, v in stats.items() if k != "quality_findings"}},
+            )
         return run
     except Exception as exc:
         log.error("sync run %s failed: %s", run.id, exc, exc_info=True)

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import random
-import sqlite3
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -20,9 +19,9 @@ from sqlalchemy.engine import make_url
 
 from levigate import audit, catalog, clock
 from levigate.config import Settings, get_settings
-from levigate.connectors import init_connector
+from levigate.connectors import ReadOnlyConnector, init_connector
 from levigate.db import Base, create_schema, init_engine, sessionmaker
-from levigate.demo.warehouse import build_warehouse
+from levigate.demo.warehouse import World, build_warehouse
 from levigate.models import (
     AccessReview,
     Approval,
@@ -39,6 +38,7 @@ from levigate.models import (
     WorkItemStatus,
     WorkItemType,
 )
+from levigate.sources import DEMO_LAYOUT
 from levigate.sync import SERVICE_USER_ID, run_sync, service_actor
 
 USERS = [
@@ -66,6 +66,7 @@ async def reset_demo(
     settings: Settings | None = None,
     *,
     today: date | None = None,
+    as_of: date | None = None,
     seed: int = 4471,
     n_patients: int = 2000,
     n_prescribers: int = 150,
@@ -76,7 +77,11 @@ async def reset_demo(
     tenant = s.tenant_id
 
     wh_path = _sqlite_path(s.warehouse_url)
-    story = build_warehouse(wh_path, today, seed=seed, n_patients=n_patients, n_prescribers=n_prescribers)
+    layout = DEMO_LAYOUT[s.source_profile]
+    world = build_warehouse(
+        wh_path, today, layout=layout, as_of=as_of, seed=seed, n_patients=n_patients, n_prescribers=n_prescribers
+    )
+    story = world.story
 
     if s.app_db_url.startswith("sqlite"):
         app_path = _sqlite_path(s.app_db_url)
@@ -91,7 +96,9 @@ async def reset_demo(
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
     await create_schema(engine)
-    connector = init_connector(s.warehouse_url, s.connector_allowed_hosts, s.connector_query_timeout_s)
+    connector = init_connector(
+        s.warehouse_url, s.connector_allowed_hosts, s.connector_query_timeout_s, s.source_profile
+    )
 
     sm = sessionmaker()
     async with sm() as db:
@@ -225,7 +232,9 @@ async def reset_demo(
             [
                 DataConnection(
                     tenant_id=tenant,
-                    name="Demo warehouse (synthetic, read-only)",
+                    name="Demo warehouse (synthetic, read-only)"
+                    if layout == "canonical"
+                    else "Demo pharmacy system via Talend (synthetic, read-only)",
                     kind="sqlite",
                     database=wh_path.name,
                     auth_method="file",
@@ -258,55 +267,11 @@ async def reset_demo(
             ]
         )
 
-        # Consent as imported from the pharmacy system: most patients consented to calls, fewer to texts.
-        con = sqlite3.connect(wh_path)
-        patient_ids = [r[0] for r in con.execute("SELECT PATIENT_ID FROM DIM_PATIENT")]
-        cities = dict(con.execute("SELECT PRESCRIBER_ID, CITY FROM DIM_PRESCRIBER"))
-        for pid in patient_ids:
-            recorded = datetime.now(UTC) - timedelta(days=rng.randint(90, 500))  # before any seeded call
-            roll = rng.random()
-            if pid == story.rx_4471_patient or roll < 0.84:
-                db.add(
-                    Consent(
-                        tenant_id=tenant,
-                        patient_id=pid,
-                        channel="call",
-                        status="granted",
-                        consent_type="prior_express",
-                        source="PMS consent import",
-                        recorded_at=recorded,
-                        recorded_by=SERVICE_USER_ID,
-                    )
-                )
-                if rng.random() < 0.4:
-                    db.add(
-                        Consent(
-                            tenant_id=tenant,
-                            patient_id=pid,
-                            channel="sms",
-                            status="granted",
-                            consent_type="prior_express_written",
-                            source="PMS consent import",
-                            recorded_at=recorded,
-                            recorded_by=SERVICE_USER_ID,
-                        )
-                    )
-            elif roll < 0.86:
-                for ch in ("call", "sms"):
-                    db.add(
-                        Consent(
-                            tenant_id=tenant,
-                            patient_id=pid,
-                            channel=ch,
-                            status="revoked",
-                            consent_type="opt_out",
-                            source="PMS consent import",
-                            recorded_at=recorded,
-                            recorded_by=SERVICE_USER_ID,
-                            synced_back_at=recorded + timedelta(hours=3),
-                        )
-                    )
-
+        # Consent comes from the pharmacy system: the first sync imports it (levigate.sync._import_consent).
+        stats_rows = await connector.fetch(
+            "prescriber_stats", cur_start=today - timedelta(days=90), prior_start=today - timedelta(days=180)
+        )
+        cities = {str(r["PRESCRIBER_ID"]): r["CITY"] for r in stats_rows}
         for rid, city in cities.items():
             db.add(PrescriberOwner(tenant_id=tenant, prescriber_id=rid, owner_id="u-marketing", territory=city))
 
@@ -380,7 +345,7 @@ async def reset_demo(
         run = await run_sync(db, connector, tenant, today, kind="manual")
 
     async with sm() as db:
-        history = await _seed_history(db, wh_path, tenant, today, rng)
+        history = await _seed_history(db, connector, world, tenant, rng)
         async with audit.audit_transaction(db):
             await audit.record(
                 db,
@@ -396,10 +361,15 @@ async def reset_demo(
         "sync": run.stats,
         **history,
         "story": {
-            "rx_4471_fill": story.rx_4471_fill_id,
+            "rx_4471": "4471-02",
+            "rx_4471_fill_id": story.rx_4471_fill_id,
+            "rx_4471_patient": story.rx_4471_patient,
             "declining_prescriber": story.declining_prescriber,
-            "unknown_code_fills": story.unknown_code_fill_ids,
+            "unknown_code_rx": story.unknown_code_rx,
         },
+        "source_profile": s.source_profile,
+        "layout": layout,
+        "mess": world.mess,
     }
 
 
@@ -408,33 +378,56 @@ def _previous_quarter(today: date) -> str:
     return f"{today.year}-Q{q - 1}" if q > 1 else f"{today.year - 1}-Q4"
 
 
-async def _seed_history(db: Any, wh_path: Path, tenant: str, today: date, rng: random.Random) -> dict[str, int]:
-    """Eight weeks of resolved work: rejected claims a biller approved a fix for, which the payer then paid."""
-    con = sqlite3.connect(wh_path)
-    con.row_factory = sqlite3.Row
-    rows = con.execute(
-        """
-        WITH ordered AS (
-          SELECT c.*, ROW_NUMBER() OVER (PARTITION BY FILL_ID ORDER BY SUBMITTED_AT) AS FIRST_RN,
-                      ROW_NUMBER() OVER (PARTITION BY FILL_ID ORDER BY SUBMITTED_AT DESC) AS LAST_RN
-          FROM FACT_CLAIM c
-        )
-        SELECT f.FILL_ID, f.RX_NUMBER, f.FILL_NUMBER, f.PATIENT_ID, f.PRESCRIBER_ID, f.PAYER_ID, f.LOCATION,
-               f.FILL_DATE, first.REJECT_CODE, first.SUBMITTED_AT AS REJECTED_AT, last.CLAIM_ID,
-               last.SUBMITTED_AT AS RESUBMITTED_AT, last.PAID_AMOUNT, last.REMITTED_AT, last.EXPECTED_AMOUNT
-        FROM FACT_RXFILL f
-        JOIN ordered first ON first.FILL_ID = f.FILL_ID AND first.FIRST_RN = 1 AND first.RESPONSE_STATUS = 'R'
-        JOIN ordered last ON last.FILL_ID = f.FILL_ID AND last.LAST_RN = 1 AND last.RESPONSE_STATUS = 'P'
-        WHERE f.FILL_DATE >= ? AND first.REJECT_CODE IN ('79','75','76','70','65','88','25','41','MR')
-        """,
-        ((today - timedelta(days=63)).isoformat(),),
-    ).fetchall()
+async def _seed_history(
+    db: Any, connector: ReadOnlyConnector, world: World, tenant: str, rng: random.Random
+) -> dict[str, int]:
+    """Eight weeks of resolved work: rejected claims a biller approved a fix for, which the payer then paid.
+
+    The history comes from the simulated world; each fill's source ID is looked up through the connector, so this
+    works on any source layout."""
+    history = world.resolved_history
+    rx_numbers = sorted({h["rx_number"] for h in history})
+    fill_ids: dict[tuple[str, int], str] = {}
+    for i in range(0, len(rx_numbers), 500):
+        for f in await connector.fetch("fills_for_rx", rx_numbers=rx_numbers[i : i + 500]):
+            fill_ids[(str(f["RX_NUMBER"]), int(f["FILL_NUMBER"]))] = str(f["FILL_ID"])
+    wanted = sorted(
+        {
+            fill_ids[(h["rx_number"], h["fill_number"])]
+            for h in history
+            if (h["rx_number"], h["fill_number"]) in fill_ids
+        }
+    )
+    claim_ids: dict[str, str] = {}
+    for i in range(0, len(wanted), 500):
+        for c in await connector.fetch("claims_for_fills", fill_ids=wanted[i : i + 500]):
+            claim_ids[str(c["FILL_ID"])] = str(c["CLAIM_ID"])
     playbook = await catalog.current_map(db, tenant, "reject_playbook")
     approvers = ["u-billing", "u-billing", "u-billing", "u-pharmacist"]
     count = 0
-    for r in rows:
+    for h in history:
         if rng.random() > 0.7:
             continue  # some were fixed outside Levigate before the pilot
+        fill_id = fill_ids.get((h["rx_number"], h["fill_number"]))
+        if fill_id is None:
+            continue
+        r = {
+            "FILL_ID": fill_id,
+            "CLAIM_ID": claim_ids.get(fill_id, ""),
+            "RX_NUMBER": h["rx_number"],
+            "FILL_NUMBER": h["fill_number"],
+            "PATIENT_ID": h["patient_id"],
+            "PRESCRIBER_ID": h["prescriber_id"],
+            "PAYER_ID": h["payer_id"],
+            "LOCATION": h["location"],
+            "FILL_DATE": h["fill_date"].isoformat(),
+            "REJECT_CODE": h["reject_code"],
+            "REJECTED_AT": h["rejected_at"].isoformat(),
+            "RESUBMITTED_AT": h["resubmitted_at"].isoformat(),
+            "PAID_AMOUNT": h["paid"],
+            "REMITTED_AT": h["remitted_at"].isoformat(),
+            "EXPECTED_AMOUNT": h["expected"],
+        }
         entry = playbook[r["REJECT_CODE"]]
         rejected_at = datetime.fromisoformat(r["REJECTED_AT"]).replace(tzinfo=UTC)
         resubmitted = datetime.fromisoformat(r["RESUBMITTED_AT"]).replace(tzinfo=UTC)
@@ -530,6 +523,7 @@ async def _seed_history(db: Any, wh_path: Path, tenant: str, today: date, rng: r
         ).all()
     )
     calls = 0
+    today = world.as_of
     for days_ago in range(1, 57):
         day = today - timedelta(days=days_ago)
         if day.weekday() >= 5:

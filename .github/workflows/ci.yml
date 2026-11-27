@@ -14,8 +14,16 @@ concurrency:
 
 jobs:
   backend:
-    name: Backend (lint, types, security, tests)
+    # The whole suite runs once per warehouse layout: Levigate's reference tables, a client's PMS tables landed by
+    # Talend (mapped), and the same tables with expected amounts taken from the client's BI view.
+    name: Backend (${{ matrix.profile }})
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [canonical, pms_snowflake, pms_snowflake_bi]
+    env:
+      LEVIGATE_TEST_PROFILE: ${{ matrix.profile }}
     services:
       postgres:
         image: postgres:16.6-alpine
@@ -37,16 +45,20 @@ jobs:
           python-version: "3.13"
       - run: uv sync --frozen
       - name: Lint and format
+        if: matrix.profile == 'canonical'
         run: uv run ruff check . && uv run ruff format --check .
       - name: Type check
+        if: matrix.profile == 'canonical'
         run: uv run mypy levigate
       - name: Static security analysis (fails on high severity)
+        if: matrix.profile == 'canonical'
         run: uv run bandit -q -r levigate -c pyproject.toml --severity-level high
-      - name: Tests (SQLite + PostgreSQL guarantees)
+      - name: Tests (SQLite + PostgreSQL guarantees; the canonical run also covers cross-layout and 50k load)
         run: uv run pytest -q
         env:
           LEVIGATE_TEST_PG_URL: postgresql+asyncpg://ci:ci@localhost:5432/levigate
       - name: Dependency vulnerabilities
+        if: matrix.profile == 'canonical'
         run: |
           uv export --frozen --no-dev --no-hashes --no-emit-project --format requirements-txt > /tmp/requirements.txt
           uv run pip-audit -r /tmp/requirements.txt --strict
@@ -73,9 +85,17 @@ jobs:
         run: npm audit --omit=dev --audit-level=high
 
   e2e:
-    name: End-to-end smoke (demo script)
+    name: End-to-end (${{ matrix.profile }}) — demo script, role journeys, accessibility
     needs: [backend, frontend]
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [canonical, pms_snowflake]
+    env:
+      LEVIGATE_ENV: demo
+      LEVIGATE_SYNC_ENABLED: "false"
+      LEVIGATE_SOURCE_PROFILE: ${{ matrix.profile }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -92,21 +112,28 @@ jobs:
           (cd backend && uv sync --frozen --no-dev)
           (cd frontend && npm ci && npm install --no-save playwright@1.49.1 && npx playwright install --with-deps chromium)
       - name: Start a fresh demo environment
-        env:
-          LEVIGATE_ENV: demo
-          LEVIGATE_SYNC_ENABLED: "false"
         run: |
           cd backend && uv run python -m levigate.demo.seed
           nohup uv run uvicorn levigate.main:app --port 8000 > /tmp/api.log 2>&1 &
+          echo $! > /tmp/api.pid
           cd ../frontend && nohup npx vite --port 5173 --strictPort > /tmp/web.log 2>&1 &
           for i in $(seq 1 60); do curl -sf localhost:8000/api/health && curl -sf localhost:5173 >/dev/null && break; sleep 1; done
-      - name: Smoke test
+      - name: Smoke test (demo script)
         working-directory: frontend
         run: npm run e2e
+      - name: Fresh demo for the role journeys (the reset replaces the databases, so the API restarts)
+        run: |
+          kill "$(cat /tmp/api.pid)" && sleep 1
+          cd backend && uv run python -m levigate.demo.seed
+          nohup uv run uvicorn levigate.main:app --port 8000 > /tmp/api.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf localhost:8000/api/health && break; sleep 1; done
+      - name: Role journeys and accessibility (WCAG 2.1 A/AA, light and dark)
+        working-directory: frontend
+        run: npm run e2e:journeys
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-screenshots
+          name: e2e-screenshots-${{ matrix.profile }}
           path: frontend/e2e/shots
           retention-days: 7
 

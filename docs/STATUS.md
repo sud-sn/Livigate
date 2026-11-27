@@ -20,11 +20,11 @@ Legend: ✅ built and tested · 🟡 partly built · ⏳ not started.
 
 | Area | Built | Not yet |
 | --- | --- | --- |
-| Claims tracker | CT-01 … CT-05 (status counts match the source — tested) | Load test of the 2 s target at 50k items |
+| Claims tracker | CT-01 … CT-05 (status counts match the source — tested); 50k open items within the 2 s target (tested) | — |
 | Insurance follow-up | IF-01 … IF-05 | IF-06 prescriber fax/message drafts |
 | Patient outreach | PO-01 … PO-05 (telephony is simulated: the provider dials server-side) | PO-06 SMS; real telephony provider |
 | Prescriber CRM | PR-01 … PR-04 | PR-05 pipeline view (owners are stored), PR-06 campaign tracking |
-| Admin | AD-01 users/roles, AD-03 catalog with two-person approval, AD-04 audit search, AD-05 results | AD-01 SSO group mapping; AD-02 add-connection form (list, test, enable/disable are built) |
+| Admin | AD-01 users/roles, AD-03 catalog with two-person approval, AD-04 audit search, AD-05 results; data source screen (mapping, column contract, data checks, BI comparison), full re-read | AD-01 SSO group mapping; AD-02 add-connection form (list, test, enable/disable are built) |
 | Compliance Center | CC-01 … CC-04, CC-06 … CC-08 | CC-05 alert delivery to the compliance owner (alerts are raised and shown); CC-09 … CC-11 |
 | HubSpot replacement | — | HS-01 … HS-08 |
 
@@ -65,14 +65,21 @@ validated chart colours with table views.
   and is used only while the vendor register shows an active BAA.
 * **Focus ring:** bright mint is 1.4:1 on white, so light surfaces use the brand's mint stroke `#0FA38A` (3.3:1).
 
+## Client data (phase 2)
+
+✅ Source profiles map a client's own Snowflake tables onto Levigate's relations (reviewed code, read-only `WITH`
+composition) — see [data-integration.md](data-integration.md). The suite runs on three layouts (reference, client PMS
+tables via Talend, client PMS + BI view) with identical results for every role; incremental sync, data checks, BI
+parity, 50k load, permissions matrix, role journeys and accessibility are tested — see
+[readiness-report.md](readiness-report.md). React Router 7 upgrade done.
+
 ## Next up (proposed order)
 
-1. OIDC SSO with the client IdP (C-04/API2) and SSO group → role mapping (AD-01).
-2. Alembic migrations (today the schema is created at startup) and infrastructure as code for the Azure tenant.
-3. Snowflake connector against the client's read-only role; replace synthetic queries' column names if they differ.
+1. Run the column contract, data checks and BI comparison against the client's real Snowflake read-only role;
+   adjust the mapping with their data team.
+2. OIDC SSO with the client IdP (C-04/API2) and SSO group → role mapping (AD-01).
+3. Alembic migrations (today the schema is created at startup) and infrastructure as code for the Azure tenant.
 4. Telephony provider integration (click-to-call, call status, opt-out sync) once its BAA is signed.
 5. IF-06, PO-06, PR-05/06, CC-05 notifications, guided tour + sandbox.
 6. HubSpot phase 1 (HS-01, HS-02).
-7. Upgrade React Router 6 → 7. Two moderate advisories remain on 6.30.6 (open redirect via backslash in
-   `<Link>`/`useNavigate`; SSR hydration injection). Neither applies today — the app only navigates to paths it
-   builds itself and does no server-side rendering — but the major upgrade clears them.
+7. Development tooling upgrades (vite 6+, vitest 3+, eslint 9.39) to clear dev-only advisories.

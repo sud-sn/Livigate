@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BadgeCheck, Download, FileArchive, ShieldAlert } from "lucide-react";
 import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router";
 import { PageHeader } from "@/app/Shell";
 import { cn } from "@/design-system/cn";
 import { PharmacyIcon } from "@/design-system/icons";
@@ -240,7 +240,7 @@ function AuditLog() {
         {q.error ? <div className="p-4"><ErrorNote error={q.error} /></div> : !q.data ? <SkeletonRows rows={10} cols={6} /> : q.data.rows.length === 0 ? (
           <EmptyState title="No audit events match these filters." />
         ) : (
-          <div className="max-h-[60vh] overflow-auto">
+          <div role="region" aria-label="Audit events" tabIndex={0} className="max-h-[60vh] overflow-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-teal">
             <table className="w-full min-w-[980px] text-sm">
               <thead className="sticky top-0 bg-mist text-left text-xs text-muted"><tr>
                 <th className="px-4 py-2.5 font-semibold">#</th><th className="px-4 py-2.5 font-semibold">When</th><th className="px-4 py-2.5 font-semibold">Who</th>
@@ -282,7 +282,7 @@ function AiLog() {
     <Card className="overflow-hidden">
       <p className="border-b border-line p-4 text-sm">{count(q.data.total)} AI calls logged · <b className={q.data.violations ? "text-rejected" : "text-success"}>{count(q.data.violations)} outside a task allow-list</b> · prompts and responses kept as SHA-256 only.</p>
       {q.data.rows.length === 0 ? <EmptyState title="No AI calls yet." /> : (
-        <div className="max-h-[60vh] overflow-auto">
+        <div role="region" aria-label="AI calls" tabIndex={0} className="max-h-[60vh] overflow-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-teal">
           <table className="w-full min-w-[980px] text-sm">
             <thead className="sticky top-0 bg-mist text-left text-xs text-muted"><tr>
               <th className="px-4 py-2.5 font-semibold">When</th><th className="px-4 py-2.5 font-semibold">Purpose</th><th className="px-4 py-2.5 font-semibold">Model</th>

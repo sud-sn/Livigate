@@ -23,7 +23,7 @@ import {
   type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
 } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { cn } from "./cn";
 
 /** True only once `active` has stayed true for `delay` ms — so fast actions never flash a spinner. */

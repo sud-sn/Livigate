@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Iterable
 from typing import Any
@@ -38,12 +39,44 @@ async def locations(connector: ReadOnlyConnector) -> list[str]:
     return [str(r["LOCATION"]) for r in await _cached(connector, "locations")]
 
 
+def display_case(name: Any) -> Any:
+    """Pharmacy systems often store names in capitals ("O'BRIEN-SMITH"); show them as people write them. Names that
+    already mix case are left exactly as entered."""
+    if not isinstance(name, str) or not name or not (name.isupper() or name.islower()):
+        return name
+    out, cap = [], True
+    for ch in name.lower():
+        out.append(ch.upper() if cap else ch)
+        cap = ch in " -'"
+    word = "".join(out)
+    return re.sub(r"\bMc([a-z])", lambda m: "Mc" + m.group(1).upper(), word)
+
+
+def phone_digits(phone: Any) -> str | None:
+    """One phone format everywhere: ten digits (US), whatever the source stored ("(708) 555-0124", "+1 708…")."""
+    digits = "".join(ch for ch in str(phone or "") if ch.isdigit())
+    if len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
+    return digits if len(digits) == 10 else None
+
+
+def normalize_patient(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **row,
+        "FIRST_NAME": display_case(row.get("FIRST_NAME")),
+        "LAST_NAME": display_case(row.get("LAST_NAME")),
+        "PHONE": phone_digits(row.get("PHONE")),
+    }
+
+
 async def patient_rows(connector: ReadOnlyConnector, patient_ids: Iterable[str]) -> dict[str, dict[str, Any]]:
+    """Patient rows for the given IDs, normalised (name case, phone format) so every screen and script shows the same
+    value whatever layout the source uses."""
     ids = sorted({str(p) for p in patient_ids})
     out: dict[str, dict[str, Any]] = {}
     for i in range(0, len(ids), 500):
         for r in await connector.fetch("patients_by_ids", patient_ids=ids[i : i + 500]):
-            out[str(r["PATIENT_ID"])] = r
+            out[str(r["PATIENT_ID"])] = normalize_patient(r)
     return out
 
 

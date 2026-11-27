@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     # Databases. The app database is read + write; the warehouse is reached only through the read-only connector.
     app_db_url: str = "sqlite+aiosqlite:///./data/levigate_app.db"
     warehouse_url: str = "sqlite:///./data/demo_warehouse.db"
+    # How this client's warehouse maps onto Levigate's canonical relations (levigate/sources).
+    source_profile: str = "canonical"
     connector_allowed_hosts: list[str] = Field(default_factory=list)
     connector_query_timeout_s: float = 20.0
 

@@ -76,6 +76,11 @@ async def build_lists(db: AsyncSession, tenant_id: str, today: date) -> dict[str
 
     lists: dict[str, dict[str, Any]] = {t: {"entries": [], "exclusions": []} for t in LIST_TYPES}
     candidates = await connector.fetch("refill_candidates", min_fill_date=today - timedelta(days=300))
+    pickups = await connector.fetch("pickup_ready")
+    balances = await connector.fetch("balances_due")
+    # A patient with no usable phone number cannot be called: listed under exclusions with the reason instead.
+    everyone = {str(r["PATIENT_ID"]) for r in (*candidates, *pickups, *balances)}
+    reachable = {pid for pid, row in (await patient_rows(connector, everyone)).items() if row.get("PHONE")}
     max_rev = max((float(c["EXPECTED_AMOUNT"] or 0) for c in candidates), default=1.0)
     for c in candidates:
         bucket, due = refill_bucket(c, today, rule)
@@ -85,7 +90,9 @@ async def build_lists(db: AsyncSession, tenant_id: str, today: date) -> dict[str
         granted, opted_out = _consent_flags(consents, pid)
         lapsed = bucket == "lapsed"
         target = "adherence_gap" if lapsed else bucket
-        elig = contact_eligibility(consent_granted=granted, opted_out=opted_out, lapsed=lapsed)
+        elig = contact_eligibility(
+            consent_granted=granted, opted_out=opted_out, lapsed=lapsed, has_phone=pid in reachable
+        )
         entry = {
             "patient_id": pid,
             "rx_number": str(c["RX_NUMBER"]),
@@ -110,7 +117,7 @@ async def build_lists(db: AsyncSession, tenant_id: str, today: date) -> dict[str
         )
         lists[target]["entries"].append({**entry, "score": score, "score_parts": parts})
 
-    for r in await connector.fetch("pickup_ready"):
+    for r in pickups:
         pid = str(r["PATIENT_ID"])
         granted, opted_out = _consent_flags(consents, pid)
         ready = to_date(r["PICKUP_READY_DATE"])
@@ -123,7 +130,9 @@ async def build_lists(db: AsyncSession, tenant_id: str, today: date) -> dict[str
             "amount": round(float(r["EXPECTED_AMOUNT"] or 0), 2),
             "last_contact": contacts[pid].isoformat() if pid in contacts else None,
         }
-        elig = contact_eligibility(consent_granted=granted, opted_out=opted_out, lapsed=False)
+        elig = contact_eligibility(
+            consent_granted=granted, opted_out=opted_out, lapsed=False, has_phone=pid in reachable
+        )
         if not elig.eligible:
             lists["ready_for_pickup"]["exclusions"].append({**entry, "reasons": elig.reasons})
             continue
@@ -137,7 +146,7 @@ async def build_lists(db: AsyncSession, tenant_id: str, today: date) -> dict[str
         )
         lists["ready_for_pickup"]["entries"].append({**entry, "score": score, "score_parts": parts})
 
-    for r in await connector.fetch("balances_due"):
+    for r in balances:
         pid = str(r["PATIENT_ID"])
         granted, opted_out = _consent_flags(consents, pid)
         last_fill = to_date(r["LAST_FILL_DATE"])
@@ -150,7 +159,9 @@ async def build_lists(db: AsyncSession, tenant_id: str, today: date) -> dict[str
             "amount": round(float(r["BALANCE"] or 0), 2),
             "last_contact": contacts[pid].isoformat() if pid in contacts else None,
         }
-        elig = contact_eligibility(consent_granted=granted, opted_out=opted_out, lapsed=False)
+        elig = contact_eligibility(
+            consent_granted=granted, opted_out=opted_out, lapsed=False, has_phone=pid in reachable
+        )
         if not elig.eligible:
             lists["balance_due"]["exclusions"].append({**entry, "reasons": elig.reasons})
             continue
@@ -165,8 +176,9 @@ async def build_lists(db: AsyncSession, tenant_id: str, today: date) -> dict[str
         lists["balance_due"]["entries"].append({**entry, "score": score, "score_parts": parts})
 
     for data in lists.values():
-        data["entries"].sort(key=lambda e: -e["score"])
-        data["exclusions"].sort(key=lambda e: e["days_to_due"])
+        # Ties broken by business keys so the list never depends on the order the warehouse returned rows in.
+        data["entries"].sort(key=lambda e: (-e["score"], *_tiebreak(e)))
+        data["exclusions"].sort(key=lambda e: (e["days_to_due"], *_tiebreak(e)))
     lists["_meta"] = {
         "rule_version": rule_entry.version if rule_entry else None,
         "weights": weights,
@@ -430,3 +442,7 @@ async def reveal_patient(
     async with audit.audit_transaction(db):
         await audit.record(db, principal.actor, "phi.reveal", "patient", patient_id, patient_id=patient_id)
     return revealed_patient(row)
+
+
+def _tiebreak(entry: dict[str, Any]) -> tuple[str, str, str]:
+    return (str(entry.get("due_date") or ""), str(entry.get("patient_id") or ""), str(entry.get("rx_number") or ""))

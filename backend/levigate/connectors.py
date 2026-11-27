@@ -20,6 +20,8 @@ import anyio
 from sqlalchemy import bindparam, create_engine, text
 from sqlalchemy.engine import URL, Engine, make_url
 
+from levigate.sources import CANONICAL_RELATIONS, QualityCheck, SourceProfile, compose, get_profile
+
 log = logging.getLogger(__name__)
 
 
@@ -266,6 +268,37 @@ QUERIES: dict[str, NamedQuery] = {
             "SELECT PATIENT_ID FROM DIM_PATIENT WHERE PATIENT_ID = :patient_id",
             {"patient_id": str},
         ),
+        _q(
+            "consent_changed_since",
+            "Patient contact consent recorded or changed in the source since the watermark",
+            """SELECT PATIENT_ID, CHANNEL, STATUS, CONSENT_TYPE, RECORDED_AT, UPDATED_AT FROM PATIENT_CONSENT
+               WHERE UPDATED_AT >= :since ORDER BY UPDATED_AT, PATIENT_ID, CHANNEL""",
+            {"since": str},
+            max_rows=200_000,
+        ),
+        _q(
+            "fill_dates_by_prescriber",
+            "Fill dates and status per prescriber (aggregated into months by the parity report)",
+            """SELECT PRESCRIBER_ID, FILL_DATE, STATUS FROM FACT_RXFILL WHERE FILL_DATE >= :start""",
+            {"start": date},
+            max_rows=500_000,
+        ),
+        _q(
+            "bi_claim_status",
+            "The client's BI view of claim status and expected reimbursement (parity report)",
+            """SELECT RX_NUMBER, FILL_NUMBER, FILL_DATE, BI_STATUS, BI_EXPECTED, BI_PAID, BI_DAYS_TO_PAY
+               FROM BI_CLAIM_STATUS WHERE FILL_DATE >= :start AND FILL_DATE <= :end""",
+            {"start": date, "end": date},
+            max_rows=500_000,
+        ),
+        _q(
+            "bi_prescriber_monthly",
+            "The client's BI view of prescriber volume per month (parity report)",
+            """SELECT PRESCRIBER_ID, FILL_MONTH, RX_COUNT FROM BI_PRESCRIBER_MONTHLY
+               WHERE FILL_MONTH >= :start_month""",
+            {"start_month": str},
+            max_rows=500_000,
+        ),
         _q("ping", "Connectivity check", "SELECT 1 AS OK"),
     ]
 }
@@ -299,10 +332,18 @@ def _validate(q: NamedQuery, params: Mapping[str, Any]) -> dict[str, Any]:
 
 
 class ReadOnlyConnector:
-    def __init__(self, url: str, *, allowed_hosts: Sequence[str] = (), timeout_s: float = 20.0) -> None:
+    def __init__(
+        self,
+        url: str,
+        *,
+        profile: SourceProfile | str = "canonical",
+        allowed_hosts: Sequence[str] = (),
+        timeout_s: float = 20.0,
+    ) -> None:
         parsed: URL = make_url(url)
         self.dialect = parsed.get_backend_name()
         self.timeout_s = timeout_s
+        self.profile = get_profile(profile) if isinstance(profile, str) else profile
         if parsed.host and parsed.host not in allowed_hosts:
             raise ConnectorError(f"host '{parsed.host}' is not on the connector allow-list")
         if self.dialect == "sqlite":
@@ -321,8 +362,12 @@ class ReadOnlyConnector:
             return value.isoformat()
         return value
 
+    def sql_for(self, q: NamedQuery) -> str:
+        """The exact SQL sent to the source for a named query: the profile's mapping CTEs, then the query."""
+        return compose(q.sql, self.profile, materialize=self.dialect == "sqlite")
+
     def _run(self, q: NamedQuery, bound: dict[str, Any]) -> list[dict[str, Any]]:
-        stmt = text(q.sql)
+        stmt = text(self.sql_for(q))
         if q.expanding:
             stmt = stmt.bindparams(*(bindparam(n, expanding=True) for n in q.expanding))
         with self.engine.connect() as conn:
@@ -340,6 +385,31 @@ class ReadOnlyConnector:
         with anyio.fail_after(self.timeout_s):
             return await anyio.to_thread.run_sync(self._run, q, bound)
 
+    def _scalar(self, sql: str, params: dict[str, Any]) -> Any:
+        composed = compose(sql, self.profile, materialize=self.dialect == "sqlite")
+        with self.engine.connect() as conn:
+            return conn.execute(text(composed), {k: self._coerce(v) for k, v in params.items()}).scalar()
+
+    async def run_check(self, check: QualityCheck, **params: Any) -> int:
+        """Run one data-quality check (profile code, reviewed like any other code) and return its count."""
+        used = {k: v for k, v in params.items() if f":{k}" in check.sql}
+        with anyio.fail_after(self.timeout_s * 3):
+            value = await anyio.to_thread.run_sync(self._scalar, check.sql, used)
+        return int(value or 0)
+
+    def _columns(self, relation: str) -> list[str]:
+        if relation not in CANONICAL_RELATIONS:
+            raise ConnectorError(f"unknown relation '{relation}'")
+        with self.engine.connect() as conn:
+            sql = compose(f"SELECT * FROM {relation} WHERE 1 = 0", self.profile, materialize=self.dialect == "sqlite")
+            result = conn.execute(text(sql))  # nosec B608 - relation name checked against the canonical list
+            return [c.upper() for c in result.keys()]
+
+    async def relation_columns(self, relation: str) -> list[str]:
+        """The columns a canonical relation actually returns from this source (mapping contract check)."""
+        with anyio.fail_after(self.timeout_s):
+            return await anyio.to_thread.run_sync(self._columns, relation)
+
     async def test(self) -> tuple[bool, str]:
         try:
             rows = await self.fetch("ping")
@@ -352,9 +422,11 @@ class ReadOnlyConnector:
 _connector: ReadOnlyConnector | None = None
 
 
-def init_connector(url: str, allowed_hosts: Sequence[str], timeout_s: float) -> ReadOnlyConnector:
+def init_connector(
+    url: str, allowed_hosts: Sequence[str], timeout_s: float, profile: str = "canonical"
+) -> ReadOnlyConnector:
     global _connector
-    _connector = ReadOnlyConnector(url, allowed_hosts=allowed_hosts, timeout_s=timeout_s)
+    _connector = ReadOnlyConnector(url, profile=profile, allowed_hosts=allowed_hosts, timeout_s=timeout_s)
     return _connector
 
 
