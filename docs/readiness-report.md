@@ -80,8 +80,9 @@ Admin → Sync → Full re-read.
   expect a round of mapping fixes with their data team.
 * **The change marker** assumes a landing timestamp per row (Talend `LOAD_TS`). Without one, only full scans are safe.
 * **Load test on SQLite**; not repeated on PostgreSQL (expected to be the same or better).
-* **Development tooling advisories** (vite/esbuild dev server, vitest, eslint) are open; none ships in the built app.
-  Planned: vite 6+, vitest 3+, eslint 9.39.
+* Development tooling advisories (vite/esbuild dev server, vitest, eslint, typescript-eslint, postcss) are fixed:
+  vite 6.4.6, vitest 4.1.12, eslint 9.39.5, postcss 8.5.33, minimatch 11.0.7 for the TypeScript lint parser.
+  `npm audit` reports 0 vulnerabilities, development tools included; container images scan clean.
 * Still open from milestone 1: OIDC SSO, migrations and infrastructure as code, real telephony, HubSpot phases
   (see [STATUS.md](STATUS.md)).
 

@@ -82,4 +82,3 @@ parity, 50k load, permissions matrix, role journeys and accessibility are tested
 4. Telephony provider integration (click-to-call, call status, opt-out sync) once its BAA is signed.
 5. IF-06, PO-06, PR-05/06, CC-05 notifications, guided tour + sandbox.
 6. HubSpot phase 1 (HS-01, HS-02).
-7. Development tooling upgrades (vite 6+, vitest 3+, eslint 9.39) to clear dev-only advisories.

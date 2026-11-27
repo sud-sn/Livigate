@@ -81,8 +81,8 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - name: Dependency vulnerabilities (runtime, high and above)
-        run: npm audit --omit=dev --audit-level=high
+      - name: Dependency vulnerabilities (runtime and development tools, high and above)
+        run: npm audit --audit-level=high
 
   e2e:
     name: End-to-end (${{ matrix.profile }}) — demo script, role journeys, accessibility
