@@ -1,0 +1,168 @@
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/space-grotesk/500.css";
+@import "@fontsource/space-grotesk/600.css";
+@import "./tokens.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    background: rgb(var(--lv-mist));
+    color: rgb(var(--lv-ink));
+    font-family: var(--lv-font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    margin: 0;
+    background: rgb(var(--lv-mist));
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  h1,
+  h2,
+  h3 {
+    font-family: var(--lv-font-display);
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+  /* Mint focus ring for keyboard users (the darker mint stroke on light surfaces meets 3:1). */
+  :focus-visible {
+    outline: 3px solid rgb(var(--lv-mint-stroke));
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+  ::selection {
+    background: rgb(var(--lv-mint) / 0.45);
+  }
+}
+
+@layer components {
+  .lv-press {
+    transition:
+      transform var(--lv-dur-press) var(--lv-ease-out),
+      background-color var(--lv-dur-hover) var(--lv-ease-out),
+      color var(--lv-dur-hover) var(--lv-ease-out),
+      border-color var(--lv-dur-hover) var(--lv-ease-out);
+  }
+  .lv-press:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+  .lv-skel {
+    background: linear-gradient(
+      90deg,
+      rgb(var(--lv-skeleton)) 0,
+      rgb(var(--lv-mist)) 50%,
+      rgb(var(--lv-skeleton)) 100%
+    );
+    background-size: 1200px 100%;
+    animation: lvshim 1.6s linear infinite;
+    border-radius: 6px;
+  }
+  .lv-in {
+    animation: lvin var(--lv-dur-panel) var(--lv-ease-out) both;
+  }
+  .lv-check {
+    stroke-dasharray: 24;
+    animation: lvcheck var(--lv-dur-success) ease-out both;
+  }
+  .lv-spin {
+    animation: lvspin 0.8s linear infinite;
+    transform-origin: center;
+  }
+  .lv-draw {
+    stroke-dasharray: 100;
+    animation: lvdraw var(--lv-dur-loader) var(--lv-ease-out) infinite;
+  }
+  .lv-slash {
+    transform-origin: 36px 40px;
+    animation: lvslash var(--lv-dur-loader) var(--lv-ease-out) infinite;
+  }
+  .lv-bar {
+    animation: lvbar 1.4s var(--lv-ease-standard) infinite;
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@keyframes lvdraw {
+  0% {
+    stroke-dashoffset: 100;
+  }
+  50%,
+  85% {
+    stroke-dashoffset: 0;
+  }
+  100% {
+    stroke-dashoffset: 100;
+  }
+}
+@keyframes lvslash {
+  0%,
+  45% {
+    transform: scale(0);
+  }
+  60%,
+  85% {
+    transform: scale(1);
+  }
+  100% {
+    transform: scale(0);
+  }
+}
+@keyframes lvbar {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(260%);
+  }
+}
+@keyframes lvshim {
+  0% {
+    background-position: -600px 0;
+  }
+  100% {
+    background-position: 600px 0;
+  }
+}
+@keyframes lvspin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes lvcheck {
+  from {
+    stroke-dashoffset: 24;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes lvin {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* All animation off when the operating system asks. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

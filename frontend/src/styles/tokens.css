@@ -1,0 +1,83 @@
+/*
+ * Levigate design tokens — the single source for colour, type, radius and motion.
+ * Colours are RGB triplets so Tailwind can apply alpha (see tailwind.config.js).
+ * Light is the default theme; dark is selected with <html data-theme="dark">, with its own steps (not a flip).
+ */
+:root {
+  /* Brand */
+  --lv-teal: 11 79 87; /* Deep Teal #0B4F57 — primary */
+  --lv-teal-hover: 14 107 110; /* #0E6B6E */
+  --lv-teal-press: 9 63 70; /* #093F46 */
+  --lv-teal-soft: 230 241 240; /* #E6F1F0 */
+  --lv-on-teal: 255 255 255;
+  --lv-ink: 11 46 51; /* Ink #0B2E33 — text */
+  --lv-mint: 94 234 212; /* Mint #5EEAD4 — accent on dark or as a stroke only */
+  --lv-mint-stroke: 15 163 138; /* #0FA38A — mint accent on light surfaces (3.3:1 on white) */
+  --lv-mist: 244 249 248; /* Mist #F4F9F8 — app background */
+
+  /* Surfaces and neutrals */
+  --lv-surface: 255 255 255;
+  --lv-surface-raised: 255 255 255;
+  --lv-line: 214 228 226; /* #D6E4E2 */
+  --lv-muted: 60 82 87; /* #3C5257 — secondary text, 7.6:1 on Mist */
+  --lv-subtle: 74 98 102; /* #4A6266 — tertiary text, 6.2:1 on Mist */
+  --lv-skeleton: 227 238 236; /* #E3EEEC */
+
+  /* Status — always paired with an icon and a word */
+  --lv-success: 15 122 90; /* #0F7A5A */
+  --lv-success-soft: 225 245 239;
+  --lv-attention: 181 71 8; /* #B54708 */
+  --lv-attention-soft: 254 240 230;
+  --lv-rejected: 180 35 24; /* #B42318 */
+  --lv-rejected-soft: 253 236 234;
+  --lv-info: 23 92 211; /* #175CD3 */
+  --lv-info-soft: 234 241 253;
+
+  /* Charts — validated single-series mark colour and recessive grid */
+  --lv-chart: 0 142 153; /* #008E99 */
+  --lv-chart-grid: 227 238 236;
+
+  /* Type */
+  --lv-font-sans: "Inter", system-ui, sans-serif;
+  --lv-font-display: "Space Grotesk", "Inter", sans-serif;
+
+  /* Motion */
+  --lv-dur-press: 120ms;
+  --lv-dur-hover: 150ms;
+  --lv-dur-panel: 250ms;
+  --lv-dur-success: 350ms;
+  --lv-dur-loader: 2.4s;
+  --lv-delay-spinner: 300ms;
+  --lv-ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --lv-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --lv-teal: 59 205 185; /* #3BCDB9 */
+  --lv-teal-hover: 94 234 212;
+  --lv-teal-press: 44 181 165;
+  --lv-teal-soft: 18 57 61;
+  --lv-on-teal: 11 46 51;
+  --lv-ink: 230 242 240;
+  --lv-mint-stroke: 94 234 212;
+  --lv-mist: 11 31 34; /* #0B1F22 */
+  --lv-surface: 15 42 46; /* #0F2A2E */
+  --lv-surface-raised: 20 52 57;
+  --lv-line: 35 69 74;
+  --lv-muted: 181 203 200;
+  --lv-subtle: 157 181 178;
+  --lv-skeleton: 26 58 63;
+  --lv-success: 78 211 166;
+  --lv-success-soft: 18 56 47;
+  --lv-attention: 247 162 92;
+  --lv-attention-soft: 61 42 23;
+  --lv-rejected: 249 112 102;
+  --lv-rejected-soft: 62 29 27;
+  --lv-info: 132 173 255;
+  --lv-info-soft: 23 41 74;
+  --lv-chart: 20 179 161; /* #14B3A1 */
+  --lv-chart-grid: 30 59 64;
+  color-scheme: dark;
+}

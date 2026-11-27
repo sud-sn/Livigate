@@ -1,0 +1,41 @@
+# Local demo stack: PostgreSQL app database, the API on a fresh synthetic warehouse, and the web app.
+#   docker compose up --build      then open http://localhost:8080
+# Every start resets the demo data (synthetic only). Credentials below are for this local stack only.
+services:
+  db:
+    image: postgres:16.6-alpine
+    environment:
+      POSTGRES_USER: levigate
+      POSTGRES_PASSWORD: local-demo-only
+      POSTGRES_DB: levigate
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U levigate"]
+      interval: 5s
+      retries: 12
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+  api:
+    build: ./backend
+    environment:
+      LEVIGATE_ENV: demo
+      LEVIGATE_APP_DB_URL: postgresql+asyncpg://levigate:local-demo-only@db:5432/levigate
+      LEVIGATE_WAREHOUSE_URL: sqlite:////app/data/demo_warehouse.db
+      LEVIGATE_ALLOWED_ORIGINS: '["http://localhost:8080"]'
+    command: sh -c "python -m levigate.demo.seed && uvicorn levigate.main:app --host 0.0.0.0 --port 8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - demo-data:/app/data
+
+  web:
+    build: ./frontend
+    ports:
+      - "8080:8080"
+    depends_on:
+      - api
+
+volumes:
+  db-data:
+  demo-data:

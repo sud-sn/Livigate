@@ -1,0 +1,14 @@
+{
+  "name": "Levigate",
+  "short_name": "Levigate",
+  "description": "Pharmacy revenue and compliance platform",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F4F9F8",
+  "theme_color": "#0B4F57",
+  "icons": [
+    { "src": "/brand/levigate-icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/brand/levigate-icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/brand/levigate-icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
